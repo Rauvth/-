@@ -16,6 +16,7 @@ DB_NAME = "project_manager.db"
 CAMBODIA_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 CONDITION_OPTIONS = [
+    "គ្មានទិន្នន័យ",
     "ទំនាស់",
     "ខុសប្រភេទទ្រព្យ",
     "ខុសប្រភេទដី",
@@ -256,7 +257,6 @@ def get_project_history(project_id):
         elif log_status == "Checked":
             log_status = "បានពិនិត្យ"
 
-        # Replaced "N/A" with "" to leave empty fields blank
         data.append({
             "Date & Time": log[0] if log[0] else "",
             "ក្បាលដី": log[1] if log[1] else "",
@@ -410,7 +410,8 @@ def main():
                 default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
-                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=(curr_notes == "គ្មានទិន្នន័យ"))
+                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
+                
                 phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
                 notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
@@ -423,7 +424,6 @@ def main():
                 st.write("---")
                 st.write("#### Edit Date & Time")
                 
-                # Fetch current Cambodia local time for default form inputs
                 current_cambodia_dt = get_cambodia_now()
                 
                 date_col, time_col = st.columns(2)
@@ -436,10 +436,12 @@ def main():
                 if submitted:
                     new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
                     
-                    # If "គ្មានទិន្នន័យ" checkbox is ticked, set notes accordingly if text area is empty
                     final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
 
-                    # If no condition is chosen, default to "ធម្មតា"
+                    # Automatically append "គ្មានទិន្នន័យ" to condition if checkbox is checked
+                    if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
+                        selected_conditions.append("គ្មានទិន្នន័យ")
+
                     condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
 
                     combined_dt = datetime.datetime.combine(selected_date, selected_time)
