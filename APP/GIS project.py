@@ -310,43 +310,16 @@ def main():
             st.session_state["authenticated"] = False
             st.rerun()
 
-    # Sidebar: Project Settings
-    st.sidebar.header("Project Settings")
     projects = get_all_projects()
 
-    project_mode = st.sidebar.radio("Project Mode", ["Select Existing", "Create New"])
-
-    if project_mode == "Select Existing" and projects:
-        project_options = {f"{p[1]} (ក្បាលដីសរុប: {p[2]})": p for p in projects}
-        selected_label = st.sidebar.selectbox("Choose Project", list(project_options.keys()))
-        project_id, project_name, total_items = project_options[selected_label]
-
-        if st.sidebar.button("Load Selected Project"):
-            st.session_state["active_project"] = (project_id, project_name, total_items)
-            st.session_state["msg"] = ("success", f"Successfully loaded project '{project_name}'!")
-            st.rerun()
-
-    else:
-        if project_mode == "Select Existing" and not projects:
-            st.sidebar.warning("No existing projects found. Please create one.")
-
-        new_name = st.sidebar.text_input("Project Name", value="Default Project")
-        total_items_input = st.sidebar.number_input("ក្បាលដីសរុប", min_value=1, value=100)
-
-        if st.sidebar.button("Save & Create Project"):
-            project_id, project_name, total_items = create_new_project(new_name, int(total_items_input))
-            st.session_state["active_project"] = (project_id, project_name, total_items)
-            st.session_state["msg"] = ("success", f"Successfully created/loaded project '{project_name}'!")
-            st.rerun()
+    # Default project initialization
+    if "active_project" not in st.session_state and projects:
+        st.session_state["active_project"] = (projects[0][0], projects[0][1], projects[0][2])
 
     if "active_project" in st.session_state:
         project_id, project_name, total_items = st.session_state["active_project"]
-    elif projects and project_mode == "Select Existing":
-        project_id, project_name, total_items = projects[0][0], projects[0][1], projects[0][2]
-        st.session_state["active_project"] = (project_id, project_name, total_items)
     else:
-        st.info("Please create or select a project from the sidebar to continue.")
-        return
+        project_id, project_name, total_items = None, "No Active Project", 0
 
     if "msg" in st.session_state:
         msg_type, msg_text = st.session_state["msg"]
@@ -361,12 +334,10 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
 
-    df_items = get_project_items(project_id, total_items)
-
     # Main Layout: Content on Left (Width: 3), Navigation Stacked on Right (Width: 1)
     content_col, nav_col = st.columns([3, 1])
 
-    # Right Column: Stacked Navigation Buttons
+    # Right Column: Navigation Stack including Project Settings
     with nav_col:
         st.write("### Navigation")
         if st.button("📋 Full Inventory", use_container_width=True):
@@ -387,115 +358,152 @@ def main():
         if st.button("📜 History Log", use_container_width=True):
             st.session_state["active_tab"] = "History Log"
             st.rerun()
+        if st.button("⚙️ Project Settings", use_container_width=True):
+            st.session_state["active_tab"] = "Project Settings"
+            st.rerun()
 
     # Left Column: Tab Views
     with content_col:
         active_tab = st.session_state["active_tab"]
 
-        if active_tab == "Full Inventory":
-            st.write("### Complete Inventory List")
-            st.dataframe(df_items, use_container_width=True)
+        if active_tab == "Project Settings":
+            st.write("### ⚙️ Project Settings")
+            project_mode = st.radio("Project Mode", ["Select Existing", "Create New"], key="main_project_mode")
 
-        elif active_tab == "Update Item":
-            st.write("### Update Item Details")
-            with st.form("update_form"):
-                code_to_update = st.number_input("ក្បាលដី", min_value=1, max_value=total_items, step=1)
-
-                current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
-                curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
-                curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
-                curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
-                
-                curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
-                default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
-
-                is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
-                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
-                
-                phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
-                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
-
-                selected_conditions = st.multiselect(
-                    "Condition (Multiple selection allowed)",
-                    options=CONDITION_OPTIONS,
-                    default=default_conditions
-                )
-
-                st.write("---")
-                st.write("#### Edit Date & Time")
-                
-                current_cambodia_dt = get_cambodia_now()
-                
-                date_col, time_col = st.columns(2)
-                with date_col:
-                    selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
-                with time_col:
-                    selected_time = st.time_input("Update Time", value=current_cambodia_dt.time())
-
-                submitted = st.form_submit_button("Save Changes")
-                if submitted:
-                    new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+            if project_mode == "Select Existing":
+                if projects:
+                    project_options = {f"{p[1]} (ក្បាលដីសរុប: {p[2]})": p for p in projects}
+                    selected_label = st.selectbox("Choose Project", list(project_options.keys()))
                     
-                    final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+                    if st.button("Load Selected Project", use_container_width=True):
+                        p_id, p_name, p_items = project_options[selected_label]
+                        st.session_state["active_project"] = (p_id, p_name, p_items)
+                        st.session_state["msg"] = ("success", f"Successfully loaded project '{p_name}'!")
+                        st.session_state["active_tab"] = "Full Inventory"
+                        st.rerun()
+                else:
+                    st.warning("No existing projects found. Please create one.")
 
-                    # Automatically append "គ្មានទិន្នន័យ" to condition if checkbox is checked
-                    if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
-                        selected_conditions.append("គ្មានទិន្នន័យ")
+            else:
+                new_name = st.text_input("Project Name", value="Default Project")
+                total_items_input = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
 
-                    condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
-
-                    combined_dt = datetime.datetime.combine(selected_date, selected_time)
-                    formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
-
-                    update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
-                    st.session_state["msg"] = ("success", f"✅ Changes saved & logged for ក្បាលដី #{code_to_update}!")
+                if st.button("Save & Create Project", use_container_width=True):
+                    p_id, p_name, p_items = create_new_project(new_name, int(total_items_input))
+                    st.session_state["active_project"] = (p_id, p_name, p_items)
+                    st.session_state["msg"] = ("success", f"Successfully created/loaded project '{p_name}'!")
+                    st.session_state["active_tab"] = "Full Inventory"
                     st.rerun()
 
-        elif active_tab == "Not Yet Checked":
-            not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
-            st.write(f"### មិនទាន់បានពិនិត្យ (Total Left: {len(not_checked_df)})")
-            st.dataframe(not_checked_df, use_container_width=True)
+        elif not project_id:
+            st.info("Please create or select a project from Project Settings to continue.")
 
-        elif active_tab == "Checked Items":
-            checked_df = df_items[df_items["Status"] == "បានពិនិត្យ"]
-            st.write(f"### បានពិនិត្យ (Total Checked: {len(checked_df)})")
+        else:
+            df_items = get_project_items(project_id, total_items)
 
-            search_code = st.number_input("Search ក្បាលដី in បានពិនិត្យ", min_value=0, max_value=total_items, value=0)
-            if search_code > 0:
-                filtered_df = checked_df[checked_df["ក្បាលដី"] == search_code]
-                st.dataframe(filtered_df, use_container_width=True)
-            else:
-                st.dataframe(checked_df, use_container_width=True)
+            if active_tab == "Full Inventory":
+                st.write("### Complete Inventory List")
+                st.dataframe(df_items, use_container_width=True)
 
-        elif active_tab == "Condition Summary":
-            st.write("### 📊 Condition Summary & Analysis")
-            
-            summary_data = []
-            for option in CONDITION_OPTIONS:
-                matching_codes = []
-                for _, row in df_items.iterrows():
-                    item_cond = row["Condition"]
-                    if item_cond and item_cond not in ["-", "ធម្មតា"]:
-                        cond_list = [c.strip() for c in item_cond.split(",")]
-                        if option in cond_list:
-                            matching_codes.append(str(row["ក្បាលដី"]))
+            elif active_tab == "Update Item":
+                st.write("### Update Item Details")
+                with st.form("update_form"):
+                    code_to_update = st.number_input("ក្បាលដី", min_value=1, max_value=total_items, step=1)
+
+                    current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+                    curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+                    curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+                    curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+                    
+                    curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
+                    default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+
+                    is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+                    no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
+                    
+                    phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+                    notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
+
+                    selected_conditions = st.multiselect(
+                        "Condition (Multiple selection allowed)",
+                        options=CONDITION_OPTIONS,
+                        default=default_conditions
+                    )
+
+                    st.write("---")
+                    st.write("#### Edit Date & Time")
+                    
+                    current_cambodia_dt = get_cambodia_now()
+                    
+                    date_col, time_col = st.columns(2)
+                    with date_col:
+                        selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
+                    with time_col:
+                        selected_time = st.time_input("Update Time", value=current_cambodia_dt.time())
+
+                    submitted = st.form_submit_button("Save Changes")
+                    if submitted:
+                        new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+                        
+                        final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+
+                        if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
+                            selected_conditions.append("គ្មានទិន្នន័យ")
+
+                        condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
+
+                        combined_dt = datetime.datetime.combine(selected_date, selected_time)
+                        formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+
+                        update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
+                        st.session_state["msg"] = ("success", f"✅ Changes saved & logged for ក្បាលដី #{code_to_update}!")
+                        st.rerun()
+
+            elif active_tab == "Not Yet Checked":
+                not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
+                st.write(f"### មិនទាន់បានពិនិត្យ (Total Left: {len(not_checked_df)})")
+                st.dataframe(not_checked_df, use_container_width=True)
+
+            elif active_tab == "Checked Items":
+                checked_df = df_items[df_items["Status"] == "បានពិនិត្យ"]
+                st.write(f"### បានពិនិត្យ (Total Checked: {len(checked_df)})")
+
+                search_code = st.number_input("Search ក្បាលដី in បានពិនិត្យ", min_value=0, max_value=total_items, value=0)
+                if search_code > 0:
+                    filtered_df = checked_df[checked_df["ក្បាលដី"] == search_code]
+                    st.dataframe(filtered_df, use_container_width=True)
+                else:
+                    st.dataframe(checked_df, use_container_width=True)
+
+            elif active_tab == "Condition Summary":
+                st.write("### 📊 Condition Summary & Analysis")
                 
-                summary_data.append({
-                    "Condition Category": option,
-                    "Total Count": len(matching_codes),
-                    "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else ""
-                })
-            
-            summary_df = pd.DataFrame(summary_data)
-            st.dataframe(summary_df, use_container_width=True)
+                summary_data = []
+                for option in CONDITION_OPTIONS:
+                    matching_codes = []
+                    for _, row in df_items.iterrows():
+                        item_cond = row["Condition"]
+                        if item_cond and item_cond not in ["-", "ធម្មតា"]:
+                            cond_list = [c.strip() for c in item_cond.split(",")]
+                            if option in cond_list:
+                                matching_codes.append(str(row["ក្បាលដី"]))
+                    
+                    summary_data.append({
+                        "Condition Category": option,
+                        "Total Count": len(matching_codes),
+                        "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else ""
+                    })
+                
+                summary_df = pd.DataFrame(summary_data)
+                st.dataframe(summary_df, use_container_width=True)
 
-        elif active_tab == "History Log":
-            st.write("### 📜 Activity History Log")
-            df_history = get_project_history(project_id)
-            if not df_history.empty:
-                st.dataframe(df_history, use_container_width=True)
-            else:
-                st.info("No activity logged for this project yet.")
+            elif active_tab == "History Log":
+                st.write("### 📜 Activity History Log")
+                df_history = get_project_history(project_id)
+                if not df_history.empty:
+                    st.dataframe(df_history, use_container_width=True)
+                else:
+                    st.info("No activity logged for this project yet.")
 
 
 if __name__ == "__main__":
