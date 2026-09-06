@@ -301,7 +301,7 @@ def render_project_selector(key_prefix="modal"):
 
 
 # ==============================================================================
-# 🪟 SUCCESS POPUP MODAL DIALOG (MIRRORS REFERENCE CARD)
+# 🪟 SUCCESS POPUP MODAL DIALOG
 # ==============================================================================
 @st.dialog(" ")
 def show_success_dialog(summary):
@@ -322,7 +322,7 @@ def show_success_dialog(summary):
     """, unsafe_allow_html=True)
 
     summary_df = pd.DataFrame([
-        {"Detail Field": "ក្បាលដី (Code)", "Saved Value": f"#{summary['code']}"},
+        {"Detail Field": "ក្បាលដី (Code)", "Saved Value": summary['code']},
         {"Detail Field": "Status", "Saved Value": summary['status']},
         {"Detail Field": "លេខទូស័ព្ទ (Phone)", "Saved Value": summary['phone']},
         {"Detail Field": "Condition", "Saved Value": summary['condition']},
@@ -512,12 +512,12 @@ def main():
 
                     update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
 
-                    # Store summary data and open the modal dialog window
+                    # Store summary data directly without 'N/A' defaults or '#' prefixes
                     st.session_state["last_saved_summary"] = {
-                        "code": code_to_update,
+                        "code": str(code_to_update),
                         "status": new_status,
-                        "phone": phone_input if phone_input else "N/A",
-                        "notes": final_notes if final_notes else "N/A",
+                        "phone": phone_input,
+                        "notes": final_notes,
                         "condition": condition_str,
                         "timestamp": formatted_dt
                     }
