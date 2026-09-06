@@ -194,7 +194,7 @@ def get_project_items(project_id, total_items):
             "Status": status,
             "លេខទូស័ព្ទ": phone,
             "ផ្សេងៗ": notes,
-            "Condition": condition if condition else "-",
+            "Condition": condition if condition else "ធម្មតា",
             "Last Updated": updated_at if updated_at else "-"
         })
     return pd.DataFrame(data)
@@ -256,14 +256,15 @@ def get_project_history(project_id):
         elif log_status == "Checked":
             log_status = "បានពិនិត្យ"
 
+        # Replaced "N/A" with "" to leave empty fields blank
         data.append({
-            "Date & Time": log[0],
-            "ក្បាលដី": log[1] if log[1] else "N/A",
-            "Action": log[2],
-            "Status": log_status if log_status else "N/A",
-            "លេខទូស័ព្ទ": log[4] if log[4] else "N/A",
-            "ផ្សេងៗ": log[5] if log[5] else "N/A",
-            "Condition": log[6] if log[6] else "N/A"
+            "Date & Time": log[0] if log[0] else "",
+            "ក្បាលដី": log[1] if log[1] else "",
+            "Action": log[2] if log[2] else "",
+            "Status": log_status if log_status else "",
+            "លេខទូស័ព្ទ": log[4] if log[4] else "",
+            "ផ្សេងៗ": log[5] if log[5] else "",
+            "Condition": log[6] if log[6] else "ធម្មតា"
         })
     return pd.DataFrame(data)
 
@@ -405,10 +406,11 @@ def main():
                 curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
                 curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
                 
-                curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] != "-") else ""
+                curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
                 default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=(curr_notes == "គ្មានទិន្នន័យ"))
                 phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
                 notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
@@ -433,12 +435,17 @@ def main():
                 submitted = st.form_submit_button("Save Changes")
                 if submitted:
                     new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
-                    condition_str = ", ".join(selected_conditions)
+                    
+                    # If "គ្មានទិន្នន័យ" checkbox is ticked, set notes accordingly if text area is empty
+                    final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+
+                    # If no condition is chosen, default to "ធម្មតា"
+                    condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
 
                     combined_dt = datetime.datetime.combine(selected_date, selected_time)
                     formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                    update_item_in_db(project_id, code_to_update, new_status, phone_input, notes_input, condition_str, formatted_dt)
+                    update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
                     st.session_state["msg"] = ("success", f"✅ Changes saved & logged for ក្បាលដី #{code_to_update}!")
                     st.rerun()
 
@@ -466,7 +473,7 @@ def main():
                 matching_codes = []
                 for _, row in df_items.iterrows():
                     item_cond = row["Condition"]
-                    if item_cond and item_cond != "-":
+                    if item_cond and item_cond not in ["-", "ធម្មតា"]:
                         cond_list = [c.strip() for c in item_cond.split(",")]
                         if option in cond_list:
                             matching_codes.append(str(row["ក្បាលដី"]))
@@ -474,7 +481,7 @@ def main():
                 summary_data.append({
                     "Condition Category": option,
                     "Total Count": len(matching_codes),
-                    "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else "None"
+                    "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else ""
                 })
             
             summary_df = pd.DataFrame(summary_data)
