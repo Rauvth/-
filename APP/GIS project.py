@@ -188,7 +188,7 @@ def get_project_items(project_id, total_items):
                 status = "បានពិនិត្យ"
         else:
             status, updated_at, phone, notes, condition = "មិនទាន់បានពិនិត្យ", "-", "", "", ""
-        
+
         data.append({
             "ក្បាលដី": code,
             "Status": status,
@@ -300,6 +300,43 @@ def render_project_selector(key_prefix="modal"):
             st.rerun()
 
 
+# ==============================================================================
+# 🪟 SUCCESS POPUP MODAL DIALOG (MIRRORS REFERENCE CARD)
+# ==============================================================================
+@st.dialog(" ")
+def show_success_dialog(summary):
+    """Displays a clean modal window styled like the NetBird confirmation popup."""
+    st.markdown("""
+        <div style="text-align: center; padding: 10px 0;">
+            <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M9 12l2 2 4-4"></path>
+            </svg>
+            <h2 style="margin-top: 10px; margin-bottom: 5px; color: #111827; font-size: 22px; font-weight: 600;">
+                Saved Successfully!
+            </h2>
+            <p style="color: #6b7280; font-size: 14px; margin-bottom: 20px;">
+                Your item details have been recorded into the project database.
+            </p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    summary_df = pd.DataFrame([
+        {"Detail Field": "ក្បាលដី (Code)", "Saved Value": f"#{summary['code']}"},
+        {"Detail Field": "Status", "Saved Value": summary['status']},
+        {"Detail Field": "លេខទូស័ព្ទ (Phone)", "Saved Value": summary['phone']},
+        {"Detail Field": "Condition", "Saved Value": summary['condition']},
+        {"Detail Field": "ផ្សេងៗ (Notes)", "Saved Value": summary['notes']},
+        {"Detail Field": "Date & Time", "Saved Value": summary['timestamp']},
+    ])
+
+    st.table(summary_df)
+
+    if st.button("Close Window", use_container_width=True):
+        st.session_state.pop("show_save_success_dialog", None)
+        st.rerun()
+
+
 if hasattr(st, "dialog"):
     @st.dialog("🚀 Welcome! Select or Create Project")
     def startup_project_modal():
@@ -327,19 +364,6 @@ def apply_center_alignment():
             [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
                 text-align: center !important;
             }
-            .success-card {
-                border: 2px solid #28a745;
-                border-radius: 12px;
-                padding: 16px;
-                background-color: #f8fff9;
-                margin-top: 15px;
-            }
-            .success-title {
-                color: #28a745;
-                font-weight: bold;
-                font-size: 20px;
-                margin-bottom: 8px;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -359,6 +383,10 @@ def main():
         if "active_project" not in st.session_state:
             return
 
+    # Trigger Save Success Modal Dialog if set
+    if st.session_state.get("show_save_success_dialog", False):
+        show_success_dialog(st.session_state.get("last_saved_summary", {}))
+
     # Top Header & Logout
     head_col1, head_col2 = st.columns([8, 2])
     with head_col1:
@@ -368,7 +396,8 @@ def main():
             st.session_state["authenticated"] = False
             st.session_state["show_startup_popup"] = True
             st.session_state.pop("active_project", None)
-            st.session_state.pop("sale_summary", None)
+            st.session_state.pop("last_saved_summary", None)
+            st.session_state.pop("show_save_success_dialog", None)
             st.rerun()
 
     project_id, project_name, total_items = st.session_state["active_project"]
@@ -386,7 +415,7 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
 
-    # Right-Hand Collapsible Drawer
+    # Navigation Menu Drawer
     with st.expander("☰ Navigation & Project Settings (Click to Open/Close)", expanded=False):
         nav_btn_col1, nav_btn_col2, nav_btn_col3 = st.columns(3)
         with nav_btn_col1:
@@ -440,13 +469,13 @@ def main():
                 curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
                 curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
                 curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
-                
+
                 curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
                 default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
-                
+
                 phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
                 notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
@@ -458,9 +487,9 @@ def main():
 
                 st.write("---")
                 st.write("#### Edit Date & Time")
-                
+
                 current_cambodia_dt = get_cambodia_now()
-                
+
                 date_col, time_col = st.columns(2)
                 with date_col:
                     selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
@@ -470,7 +499,7 @@ def main():
                 submitted = st.form_submit_button("Save Changes")
                 if submitted:
                     new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
-                    
+
                     final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
 
                     if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
@@ -482,9 +511,9 @@ def main():
                     formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
                     update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
-                    
-                    # Store summary details for the bottom success panel
-                    st.session_state["sale_summary"] = {
+
+                    # Store summary data and open the modal dialog window
+                    st.session_state["last_saved_summary"] = {
                         "code": code_to_update,
                         "status": new_status,
                         "phone": phone_input if phone_input else "N/A",
@@ -492,28 +521,8 @@ def main():
                         "condition": condition_str,
                         "timestamp": formatted_dt
                     }
+                    st.session_state["show_save_success_dialog"] = True
                     st.rerun()
-
-            # Success Banner & Bottom Summary Breakdown
-            if "sale_summary" in st.session_state:
-                summary = st.session_state["sale_summary"]
-                st.write("---")
-                st.markdown(f"""
-                    <div class="success-card">
-                        <div class="success-title">✅ Sold / Updated Successfully!</div>
-                        <p><b>Summary Details Below:</b></p>
-                    </div>
-                """, unsafe_allow_html=True)
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("ក្បាលដី Code", f"#{summary['code']}")
-                col2.metric("Status", summary['status'])
-                col3.metric("Date & Time", summary['timestamp'])
-
-                col4, col5, col6 = st.columns(3)
-                col4.metric("លេខទូស័ព្ទ", summary['phone'])
-                col5.metric("Condition", summary['condition'])
-                col6.metric("ផ្សេងៗ (Notes)", summary['notes'])
 
         elif active_tab == "Not Yet Checked":
             not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
@@ -533,7 +542,7 @@ def main():
 
         elif active_tab == "Condition Summary":
             st.write("### 📊 Condition Summary & Analysis")
-            
+
             summary_data = []
             for option in CONDITION_OPTIONS:
                 matching_codes = []
@@ -543,13 +552,13 @@ def main():
                         cond_list = [c.strip() for c in item_cond.split(",")]
                         if option in cond_list:
                             matching_codes.append(str(row["ក្បាលដី"]))
-                
+
                 summary_data.append({
                     "Condition Category": option,
                     "Total Count": len(matching_codes),
                     "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else ""
                 })
-            
+
             summary_df = pd.DataFrame(summary_data)
             st.dataframe(summary_df, use_container_width=True)
 
