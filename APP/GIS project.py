@@ -300,7 +300,6 @@ def render_project_selector(key_prefix="modal"):
             st.rerun()
 
 
-# Modal Popup for Login/Startup
 if hasattr(st, "dialog"):
     @st.dialog("🚀 Welcome! Select or Create Project")
     def startup_project_modal():
@@ -327,6 +326,19 @@ def apply_center_alignment():
             }
             [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
                 text-align: center !important;
+            }
+            .success-card {
+                border: 2px solid #28a745;
+                border-radius: 12px;
+                padding: 16px;
+                background-color: #f8fff9;
+                margin-top: 15px;
+            }
+            .success-title {
+                color: #28a745;
+                font-weight: bold;
+                font-size: 20px;
+                margin-bottom: 8px;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -356,6 +368,7 @@ def main():
             st.session_state["authenticated"] = False
             st.session_state["show_startup_popup"] = True
             st.session_state.pop("active_project", None)
+            st.session_state.pop("sale_summary", None)
             st.rerun()
 
     project_id, project_name, total_items = st.session_state["active_project"]
@@ -373,7 +386,7 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
 
-    # Right-Hand Collapsible Drawer (Expandable/Collapsible Navigation Menu)
+    # Right-Hand Collapsible Drawer
     with st.expander("☰ Navigation & Project Settings (Click to Open/Close)", expanded=False):
         nav_btn_col1, nav_btn_col2, nav_btn_col3 = st.columns(3)
         with nav_btn_col1:
@@ -405,7 +418,6 @@ def main():
 
     st.write("---")
 
-    # Main Tab Views
     active_tab = st.session_state["active_tab"]
 
     if active_tab == "Project Settings":
@@ -470,8 +482,38 @@ def main():
                     formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
                     update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
-                    st.session_state["msg"] = ("success", f"✅ Changes saved & logged for ក្បាលដី #{code_to_update}!")
+                    
+                    # Store summary details for the bottom success panel
+                    st.session_state["sale_summary"] = {
+                        "code": code_to_update,
+                        "status": new_status,
+                        "phone": phone_input if phone_input else "N/A",
+                        "notes": final_notes if final_notes else "N/A",
+                        "condition": condition_str,
+                        "timestamp": formatted_dt
+                    }
                     st.rerun()
+
+            # Success Banner & Bottom Summary Breakdown
+            if "sale_summary" in st.session_state:
+                summary = st.session_state["sale_summary"]
+                st.write("---")
+                st.markdown(f"""
+                    <div class="success-card">
+                        <div class="success-title">✅ Sold / Updated Successfully!</div>
+                        <p><b>Summary Details Below:</b></p>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("ក្បាលដី Code", f"#{summary['code']}")
+                col2.metric("Status", summary['status'])
+                col3.metric("Date & Time", summary['timestamp'])
+
+                col4, col5, col6 = st.columns(3)
+                col4.metric("លេខទូស័ព្ទ", summary['phone'])
+                col5.metric("Condition", summary['condition'])
+                col6.metric("ផ្សេងៗ (Notes)", summary['notes'])
 
         elif active_tab == "Not Yet Checked":
             not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
