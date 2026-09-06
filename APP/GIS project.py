@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 
@@ -12,6 +13,21 @@ USER_CREDENTIALS = {
 # ==============================================================================
 
 DB_NAME = "project_manager.db"
+CAMBODIA_TZ = ZoneInfo("Asia/Phnom_Penh")
+
+CONDITION_OPTIONS = [
+    "ទំនាស់",
+    "ខុសប្រភេទទ្រព្យ",
+    "ខុសប្រភេទដី",
+    "ខុសអក្ខរវិរុទ្ខ",
+    "កែតម្រូវព្រំដី",
+    "គ្មានហត្ថលេខា"
+]
+
+
+def get_cambodia_now():
+    """Returns the current datetime in Cambodia (Asia/Phnom_Penh) timezone."""
+    return datetime.datetime.now(CAMBODIA_TZ)
 
 
 def initialize_database():
@@ -36,6 +52,7 @@ def initialize_database():
             updated_at TEXT DEFAULT '',
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
+            condition TEXT DEFAULT '',
             FOREIGN KEY (project_id) REFERENCES projects (id)
         )
     """)
@@ -45,6 +62,8 @@ def initialize_database():
     items_columns = [column[1] for column in cursor.fetchall()]
     if "updated_at" not in items_columns:
         cursor.execute("ALTER TABLE items ADD COLUMN updated_at TEXT DEFAULT ''")
+    if "condition" not in items_columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN condition TEXT DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS logs (
@@ -55,6 +74,7 @@ def initialize_database():
             status TEXT DEFAULT '',
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
+            condition TEXT DEFAULT '',
             timestamp TEXT,
             FOREIGN KEY (project_id) REFERENCES projects (id)
         )
@@ -70,22 +90,24 @@ def initialize_database():
         cursor.execute("ALTER TABLE logs ADD COLUMN customer_phone TEXT DEFAULT ''")
     if "notes" not in logs_columns:
         cursor.execute("ALTER TABLE logs ADD COLUMN notes TEXT DEFAULT ''")
+    if "condition" not in logs_columns:
+        cursor.execute("ALTER TABLE logs ADD COLUMN condition TEXT DEFAULT ''")
 
     conn.commit()
     conn.close()
 
 
-def log_activity(project_id, code, action_type, status="", phone="", notes="", custom_timestamp=""):
-    """Records an action in the database with separate columns and date/time."""
+def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", custom_timestamp=""):
+    """Records an action in the database using Cambodia local time by default."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    timestamp = custom_timestamp if custom_timestamp else datetime.datetime.now().strftime("%d/%m/%Y, %I:%M %p")
+    timestamp = custom_timestamp if custom_timestamp else get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
 
     cursor.execute("""
-        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (project_id, code, action_type, status, phone, notes, timestamp))
+        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (project_id, code, action_type, status, phone, notes, condition, timestamp))
 
     conn.commit()
     conn.close()
@@ -143,37 +165,38 @@ def create_new_project(name, total_items):
 
 
 def get_project_items(project_id, total_items):
-    """Returns a full DataFrame of items for a given project with Last Updated date."""
+    """Returns a full DataFrame of items for a given project with Condition positioned between Notes and Last Updated."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT code, status, updated_at, customer_phone, notes 
+        SELECT code, status, updated_at, customer_phone, notes, condition 
         FROM items 
         WHERE project_id = ? 
         ORDER BY code ASC
     """, (project_id,))
 
-    existing_items = {row[0]: (row[1], row[2], row[3], row[4]) for row in cursor.fetchall()}
+    existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5]) for row in cursor.fetchall()}
     conn.close()
 
     data = []
     for code in range(1, total_items + 1):
         if code in existing_items:
-            status, updated_at, phone, notes = existing_items[code]
+            status, updated_at, phone, notes, condition = existing_items[code]
         else:
-            status, updated_at, phone, notes = "Not Yet Checked", "-", "", ""
+            status, updated_at, phone, notes, condition = "Not Yet Checked", "-", "", "", ""
         data.append({
             "Code": code,
             "Status": status,
-            "Last Updated": updated_at if updated_at else "-",
             "Customer Phone": phone,
-            "Notes": notes
+            "Notes": notes,
+            "Condition": condition if condition else "-",
+            "Last Updated": updated_at if updated_at else "-"
         })
     return pd.DataFrame(data)
 
 
-def update_item_in_db(project_id, code, status, phone, notes, custom_timestamp):
-    """Inserts or updates an item's details, date/time, and logs changes."""
+def update_item_in_db(project_id, code, status, phone, notes, condition, custom_timestamp):
+    """Inserts or updates an item's details, condition, date/time, and logs changes."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -183,14 +206,14 @@ def update_item_in_db(project_id, code, status, phone, notes, custom_timestamp):
 
     if item:
         cursor.execute("""
-            UPDATE items SET status = ?, updated_at = ?, customer_phone = ?, notes = ? 
+            UPDATE items SET status = ?, updated_at = ?, customer_phone = ?, notes = ?, condition = ? 
             WHERE id = ?
-        """, (status, custom_timestamp, phone, notes, item[0]))
+        """, (status, custom_timestamp, phone, notes, condition, item[0]))
     else:
         cursor.execute("""
-            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (project_id, code, status, custom_timestamp, phone, notes))
+            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (project_id, code, status, custom_timestamp, phone, notes, condition))
 
     conn.commit()
     conn.close()
@@ -202,6 +225,7 @@ def update_item_in_db(project_id, code, status, phone, notes, custom_timestamp):
         status=status,
         phone=phone,
         notes=notes,
+        condition=condition,
         custom_timestamp=custom_timestamp
     )
 
@@ -211,7 +235,7 @@ def get_project_history(project_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT timestamp, code, action_type, status, customer_phone, notes 
+        SELECT timestamp, code, action_type, status, customer_phone, notes, condition 
         FROM logs 
         WHERE project_id = ? 
         ORDER BY id DESC
@@ -227,7 +251,8 @@ def get_project_history(project_id):
             "Action": log[2],
             "Status": log[3] if log[3] else "N/A",
             "Customer Phone": log[4] if log[4] else "N/A",
-            "Notes": log[5] if log[5] else "N/A"
+            "Notes": log[5] if log[5] else "N/A",
+            "Condition": log[6] if log[6] else "N/A"
         })
     return pd.DataFrame(data)
 
@@ -344,6 +369,9 @@ def main():
         if st.button("✅ Checked Items", use_container_width=True):
             st.session_state["active_tab"] = "Checked Items"
             st.rerun()
+        if st.button("📊 Condition Summary", use_container_width=True):
+            st.session_state["active_tab"] = "Condition Summary"
+            st.rerun()
         if st.button("📜 History Log", use_container_width=True):
             st.session_state["active_tab"] = "History Log"
             st.rerun()
@@ -366,26 +394,42 @@ def main():
                 curr_phone = current_row["Customer Phone"] if current_row is not None else ""
                 curr_notes = current_row["Notes"] if current_row is not None else ""
 
+                curr_cond_str = current_row["Condition"] if (
+                            current_row is not None and current_row["Condition"] != "-") else ""
+                default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+
                 is_checked = st.checkbox("Mark as Checked", value=(curr_status == "Checked"))
                 phone_input = st.text_input("Customer Phone", value=curr_phone)
                 notes_input = st.text_area("Notes", value=curr_notes)
 
+                selected_conditions = st.multiselect(
+                    "Condition (Multiple selection allowed)",
+                    options=CONDITION_OPTIONS,
+                    default=default_conditions
+                )
+
                 st.write("---")
                 st.write("#### Edit Date & Time")
+
+                # Fetch current Cambodia local time for default form inputs
+                current_cambodia_dt = get_cambodia_now()
+
                 date_col, time_col = st.columns(2)
                 with date_col:
-                    selected_date = st.date_input("Update Date", value=datetime.datetime.now().date())
+                    selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
                 with time_col:
-                    selected_time = st.time_input("Update Time", value=datetime.datetime.now().time())
+                    selected_time = st.time_input("Update Time", value=current_cambodia_dt.time())
 
                 submitted = st.form_submit_button("Save Changes")
                 if submitted:
                     new_status = "Checked" if is_checked else "Not Yet Checked"
+                    condition_str = ", ".join(selected_conditions)
 
                     combined_dt = datetime.datetime.combine(selected_date, selected_time)
                     formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                    update_item_in_db(project_id, code_to_update, new_status, phone_input, notes_input, formatted_dt)
+                    update_item_in_db(project_id, code_to_update, new_status, phone_input, notes_input, condition_str,
+                                      formatted_dt)
                     st.session_state["msg"] = ("success", f"✅ Changes saved & logged for Item Code #{code_to_update}!")
                     st.rerun()
 
@@ -404,6 +448,28 @@ def main():
                 st.dataframe(filtered_df, use_container_width=True)
             else:
                 st.dataframe(checked_df, use_container_width=True)
+
+        elif active_tab == "Condition Summary":
+            st.write("### 📊 Condition Summary & Analysis")
+
+            summary_data = []
+            for option in CONDITION_OPTIONS:
+                matching_codes = []
+                for _, row in df_items.iterrows():
+                    item_cond = row["Condition"]
+                    if item_cond and item_cond != "-":
+                        cond_list = [c.strip() for c in item_cond.split(",")]
+                        if option in cond_list:
+                            matching_codes.append(str(row["Code"]))
+
+                summary_data.append({
+                    "Condition Category": option,
+                    "Total Count": len(matching_codes),
+                    "Item Codes": ", ".join(matching_codes) if matching_codes else "None"
+                })
+
+            summary_df = pd.DataFrame(summary_data)
+            st.dataframe(summary_df, use_container_width=True)
 
         elif active_tab == "History Log":
             st.write("### 📜 Activity History Log")
