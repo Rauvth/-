@@ -48,7 +48,7 @@ def initialize_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             project_id INTEGER,
             code INTEGER,
-            status TEXT DEFAULT 'Not Yet Checked',
+            status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
             updated_at TEXT DEFAULT '',
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
@@ -155,7 +155,7 @@ def create_new_project(name, total_items):
         cursor.execute("INSERT INTO projects (name, total_items) VALUES (?, ?)", (name, total_items))
         conn.commit()
         project_id = cursor.lastrowid
-        log_activity(project_id, None, "Project Created", notes=f"Created project '{name}' with capacity {total_items}")
+        log_activity(project_id, None, "Project Created", notes=f"Created project '{name}' with ក្បាលដីសរុប {total_items}")
     except sqlite3.IntegrityError:
         cursor.execute("SELECT id, name, total_items FROM projects WHERE name = ?", (name,))
         row = cursor.fetchone()
@@ -165,7 +165,7 @@ def create_new_project(name, total_items):
 
 
 def get_project_items(project_id, total_items):
-    """Returns a full DataFrame of items for a given project with Condition positioned between Notes and Last Updated."""
+    """Returns a full DataFrame of items for a given project with Khmer column titles."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -182,13 +182,18 @@ def get_project_items(project_id, total_items):
     for code in range(1, total_items + 1):
         if code in existing_items:
             status, updated_at, phone, notes, condition = existing_items[code]
+            if status in ["Not Yet Checked", ""]:
+                status = "មិនទាន់បានពិនិត្យ"
+            elif status == "Checked":
+                status = "បានពិនិត្យ"
         else:
-            status, updated_at, phone, notes, condition = "Not Yet Checked", "-", "", "", ""
+            status, updated_at, phone, notes, condition = "មិនទាន់បានពិនិត្យ", "-", "", "", ""
+        
         data.append({
-            "Code": code,
+            "ក្បាលដី": code,
             "Status": status,
-            "Customer Phone": phone,
-            "Notes": notes,
+            "លេខទូស័ព្ទ": phone,
+            "ផ្សេងៗ": notes,
             "Condition": condition if condition else "-",
             "Last Updated": updated_at if updated_at else "-"
         })
@@ -231,7 +236,7 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, custom_
 
 
 def get_project_history(project_id):
-    """Fetches all history logs for the active project in separate columns."""
+    """Fetches all history logs for the active project with Khmer column headers."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -245,13 +250,19 @@ def get_project_history(project_id):
 
     data = []
     for log in logs:
+        log_status = log[3]
+        if log_status in ["Not Yet Checked", ""]:
+            log_status = "មិនទាន់បានពិនិត្យ"
+        elif log_status == "Checked":
+            log_status = "បានពិនិត្យ"
+
         data.append({
             "Date & Time": log[0],
-            "Item Code": log[1] if log[1] else "N/A",
+            "ក្បាលដី": log[1] if log[1] else "N/A",
             "Action": log[2],
-            "Status": log[3] if log[3] else "N/A",
-            "Customer Phone": log[4] if log[4] else "N/A",
-            "Notes": log[5] if log[5] else "N/A",
+            "Status": log_status if log_status else "N/A",
+            "លេខទូស័ព្ទ": log[4] if log[4] else "N/A",
+            "ផ្សេងៗ": log[5] if log[5] else "N/A",
             "Condition": log[6] if log[6] else "N/A"
         })
     return pd.DataFrame(data)
@@ -281,7 +292,7 @@ def apply_center_alignment():
 
 
 def main():
-    st.set_page_config(page_title="Project Manager", layout="wide")
+    st.set_page_config(page_title="កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង", layout="wide")
     apply_center_alignment()
 
     if not check_password():
@@ -292,7 +303,7 @@ def main():
     # Top Header & Logout
     head_col1, head_col2 = st.columns([8, 2])
     with head_col1:
-        st.title("📦 Store Project Manager")
+        st.title("📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង")
     with head_col2:
         if st.button("Logout"):
             st.session_state["authenticated"] = False
@@ -305,7 +316,7 @@ def main():
     project_mode = st.sidebar.radio("Project Mode", ["Select Existing", "Create New"])
 
     if project_mode == "Select Existing" and projects:
-        project_options = {f"{p[1]} (Capacity: {p[2]})": p for p in projects}
+        project_options = {f"{p[1]} (ក្បាលដីសរុប: {p[2]})": p for p in projects}
         selected_label = st.sidebar.selectbox("Choose Project", list(project_options.keys()))
         project_id, project_name, total_items = project_options[selected_label]
 
@@ -319,7 +330,7 @@ def main():
             st.sidebar.warning("No existing projects found. Please create one.")
 
         new_name = st.sidebar.text_input("Project Name", value="Default Project")
-        total_items_input = st.sidebar.number_input("Total Item Limit", min_value=1, value=100)
+        total_items_input = st.sidebar.number_input("ក្បាលដីសរុប", min_value=1, value=100)
 
         if st.sidebar.button("Save & Create Project"):
             project_id, project_name, total_items = create_new_project(new_name, int(total_items_input))
@@ -344,7 +355,7 @@ def main():
             st.info(msg_text)
         del st.session_state["msg"]
 
-    st.subheader(f"Active Project: **{project_name}** (Capacity: {total_items})")
+    st.subheader(f"Active Project: **{project_name}** (ក្បាលដីសរុប: {total_items})")
 
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
@@ -363,10 +374,10 @@ def main():
         if st.button("✏️ Update Item", use_container_width=True):
             st.session_state["active_tab"] = "Update Item"
             st.rerun()
-        if st.button("⏳ Not Yet Checked", use_container_width=True):
+        if st.button("⏳ មិនទាន់បានពិនិត្យ", use_container_width=True):
             st.session_state["active_tab"] = "Not Yet Checked"
             st.rerun()
-        if st.button("✅ Checked Items", use_container_width=True):
+        if st.button("✅ បានពិនិត្យ", use_container_width=True):
             st.session_state["active_tab"] = "Checked Items"
             st.rerun()
         if st.button("📊 Condition Summary", use_container_width=True):
@@ -387,20 +398,19 @@ def main():
         elif active_tab == "Update Item":
             st.write("### Update Item Details")
             with st.form("update_form"):
-                code_to_update = st.number_input("Item Code", min_value=1, max_value=total_items, step=1)
+                code_to_update = st.number_input("ក្បាលដី", min_value=1, max_value=total_items, step=1)
 
-                current_row = df_items[df_items["Code"] == code_to_update].iloc[0] if not df_items.empty else None
-                curr_status = current_row["Status"] if current_row is not None else "Not Yet Checked"
-                curr_phone = current_row["Customer Phone"] if current_row is not None else ""
-                curr_notes = current_row["Notes"] if current_row is not None else ""
-
-                curr_cond_str = current_row["Condition"] if (
-                            current_row is not None and current_row["Condition"] != "-") else ""
+                current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+                curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+                curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+                curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+                
+                curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] != "-") else ""
                 default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
-                is_checked = st.checkbox("Mark as Checked", value=(curr_status == "Checked"))
-                phone_input = st.text_input("Customer Phone", value=curr_phone)
-                notes_input = st.text_area("Notes", value=curr_notes)
+                is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+                phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
                 selected_conditions = st.multiselect(
                     "Condition (Multiple selection allowed)",
@@ -410,10 +420,10 @@ def main():
 
                 st.write("---")
                 st.write("#### Edit Date & Time")
-
+                
                 # Fetch current Cambodia local time for default form inputs
                 current_cambodia_dt = get_cambodia_now()
-
+                
                 date_col, time_col = st.columns(2)
                 with date_col:
                     selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
@@ -422,36 +432,35 @@ def main():
 
                 submitted = st.form_submit_button("Save Changes")
                 if submitted:
-                    new_status = "Checked" if is_checked else "Not Yet Checked"
+                    new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
                     condition_str = ", ".join(selected_conditions)
 
                     combined_dt = datetime.datetime.combine(selected_date, selected_time)
                     formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                    update_item_in_db(project_id, code_to_update, new_status, phone_input, notes_input, condition_str,
-                                      formatted_dt)
-                    st.session_state["msg"] = ("success", f"✅ Changes saved & logged for Item Code #{code_to_update}!")
+                    update_item_in_db(project_id, code_to_update, new_status, phone_input, notes_input, condition_str, formatted_dt)
+                    st.session_state["msg"] = ("success", f"✅ Changes saved & logged for ក្បាលដី #{code_to_update}!")
                     st.rerun()
 
         elif active_tab == "Not Yet Checked":
-            not_checked_df = df_items[df_items["Status"] == "Not Yet Checked"]
-            st.write(f"### Not Yet Checked (Total Left: {len(not_checked_df)})")
+            not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
+            st.write(f"### មិនទាន់បានពិនិត្យ (Total Left: {len(not_checked_df)})")
             st.dataframe(not_checked_df, use_container_width=True)
 
         elif active_tab == "Checked Items":
-            checked_df = df_items[df_items["Status"] == "Checked"]
-            st.write(f"### Checked Items (Total Checked: {len(checked_df)})")
+            checked_df = df_items[df_items["Status"] == "បានពិនិត្យ"]
+            st.write(f"### បានពិនិត្យ (Total Checked: {len(checked_df)})")
 
-            search_code = st.number_input("Search Code in Checked Items", min_value=0, max_value=total_items, value=0)
+            search_code = st.number_input("Search ក្បាលដី in បានពិនិត្យ", min_value=0, max_value=total_items, value=0)
             if search_code > 0:
-                filtered_df = checked_df[checked_df["Code"] == search_code]
+                filtered_df = checked_df[checked_df["ក្បាលដី"] == search_code]
                 st.dataframe(filtered_df, use_container_width=True)
             else:
                 st.dataframe(checked_df, use_container_width=True)
 
         elif active_tab == "Condition Summary":
             st.write("### 📊 Condition Summary & Analysis")
-
+            
             summary_data = []
             for option in CONDITION_OPTIONS:
                 matching_codes = []
@@ -460,14 +469,14 @@ def main():
                     if item_cond and item_cond != "-":
                         cond_list = [c.strip() for c in item_cond.split(",")]
                         if option in cond_list:
-                            matching_codes.append(str(row["Code"]))
-
+                            matching_codes.append(str(row["ក្បាលដី"]))
+                
                 summary_data.append({
                     "Condition Category": option,
                     "Total Count": len(matching_codes),
-                    "Item Codes": ", ".join(matching_codes) if matching_codes else "None"
+                    "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else "None"
                 })
-
+            
             summary_df = pd.DataFrame(summary_data)
             st.dataframe(summary_df, use_container_width=True)
 
