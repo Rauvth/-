@@ -462,17 +462,33 @@ def main():
 
         elif active_tab == "Update Item":
             st.write("### Update Item Details")
+
+            # --- SEARCH & LOAD SECTION (OUTSIDE FORM FOR INSTANT AUTO-REFRESH) ---
+            search_col, load_btn_col = st.columns([3, 1])
+            with search_col:
+                code_to_update = st.number_input(
+                    "ក្បាលដី",
+                    min_value=1,
+                    max_value=total_items,
+                    step=1,
+                    key="update_item_code_input"
+                )
+            with load_btn_col:
+                st.write("&#160;")  # Visual spacing alignment
+                if st.button("🔄 Load Data", use_container_width=True):
+                    st.rerun()
+
+            # Retrieve database details for the selected parcel number
+            current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+            curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+            curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+            curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+
+            curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
+            default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+
+            # --- EDIT FORM SECTION ---
             with st.form("update_form"):
-                code_to_update = st.number_input("ក្បាលដី", min_value=1, max_value=total_items, step=1)
-
-                current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
-                curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
-                curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
-                curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
-
-                curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
-                default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
-
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
 
@@ -512,7 +528,7 @@ def main():
 
                     update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
 
-                    # Store summary data directly without 'N/A' defaults or '#' prefixes
+                    # Store summary data and trigger success modal popup
                     st.session_state["last_saved_summary"] = {
                         "code": str(code_to_update),
                         "status": new_status,
