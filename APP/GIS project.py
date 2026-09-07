@@ -200,6 +200,13 @@ def get_project_items(project_id, total_items):
     return pd.DataFrame(data)
 
 
+def is_no_data(row):
+    """Checks if an item is marked as គ្មានទិន្នន័យ via Condition or Notes."""
+    cond = str(row["Condition"])
+    notes = str(row["ផ្សេងៗ"])
+    return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
+
+
 def update_item_in_db(project_id, code, status, phone, notes, condition, custom_timestamp):
     """Inserts or updates an item's details, condition, date/time, and logs changes."""
     conn = sqlite3.connect(DB_NAME)
@@ -283,6 +290,7 @@ def render_project_selector(key_prefix="modal"):
                 st.session_state["show_startup_popup"] = False
                 st.session_state["msg"] = ("success", f"Successfully loaded project '{p_name}'!")
                 st.session_state["active_tab"] = "Full Inventory"
+                st.session_state["nav_expanded"] = False
                 st.rerun()
         else:
             st.warning("No existing projects found. Please create one below.")
@@ -297,6 +305,7 @@ def render_project_selector(key_prefix="modal"):
             st.session_state["show_startup_popup"] = False
             st.session_state["msg"] = ("success", f"Successfully created/loaded project '{p_name}'!")
             st.session_state["active_tab"] = "Full Inventory"
+            st.session_state["nav_expanded"] = False
             st.rerun()
 
 
@@ -368,6 +377,13 @@ def apply_center_alignment():
     """, unsafe_allow_html=True)
 
 
+def switch_tab(tab_name):
+    """Helper function to switch active tab and automatically collapse navigation menu."""
+    st.session_state["active_tab"] = tab_name
+    st.session_state["nav_expanded"] = False
+    st.rerun()
+
+
 def main():
     st.set_page_config(page_title="កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង", layout="wide")
     apply_center_alignment()
@@ -376,6 +392,10 @@ def main():
         return
 
     initialize_database()
+
+    # Initialize navigation expander state
+    if "nav_expanded" not in st.session_state:
+        st.session_state["nav_expanded"] = False
 
     # Mandatory Startup Pop-Up Trigger
     if st.session_state.get("show_startup_popup", True) or "active_project" not in st.session_state:
@@ -415,35 +435,32 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
 
-    # Navigation Menu Drawer
-    with st.expander("☰ Navigation & Project Settings (Click to Open/Close)", expanded=False):
-        nav_btn_col1, nav_btn_col2, nav_btn_col3 = st.columns(3)
+    # Navigation Menu Drawer (Automatically closes upon clicking any sub-tab button)
+    with st.expander("☰ Navigation & Project Settings (Click to Open/Close)", expanded=st.session_state["nav_expanded"]):
+        nav_btn_col1, nav_btn_col2, nav_btn_col3, nav_btn_col4 = st.columns(4)
         with nav_btn_col1:
             if st.button("📋 Full Inventory", use_container_width=True):
-                st.session_state["active_tab"] = "Full Inventory"
-                st.rerun()
+                switch_tab("Full Inventory")
             if st.button("✏️ Update Item", use_container_width=True):
-                st.session_state["active_tab"] = "Update Item"
-                st.rerun()
-            if st.button("⏳ មិនទាន់បានពិនិត្យ", use_container_width=True):
-                st.session_state["active_tab"] = "Not Yet Checked"
-                st.rerun()
+                switch_tab("Update Item")
 
         with nav_btn_col2:
+            if st.button("⏳ មិនទាន់បានពិនិត្យ", use_container_width=True):
+                switch_tab("Not Yet Checked")
             if st.button("✅ បានពិនិត្យ", use_container_width=True):
-                st.session_state["active_tab"] = "Checked Items"
-                st.rerun()
-            if st.button("📊 Condition Summary", use_container_width=True):
-                st.session_state["active_tab"] = "Condition Summary"
-                st.rerun()
-            if st.button("📜 History Log", use_container_width=True):
-                st.session_state["active_tab"] = "History Log"
-                st.rerun()
+                switch_tab("Checked Items")
 
         with nav_btn_col3:
+            if st.button("🚫 ក្បាលដីគ្មានទិន្នន័យ", use_container_width=True):
+                switch_tab("No Data Items")
+            if st.button("📊 Condition Summary", use_container_width=True):
+                switch_tab("Condition Summary")
+
+        with nav_btn_col4:
+            if st.button("📜 History Log", use_container_width=True):
+                switch_tab("History Log")
             if st.button("⚙️ Project Settings", use_container_width=True):
-                st.session_state["active_tab"] = "Project Settings"
-                st.rerun()
+                switch_tab("Project Settings")
 
     st.write("---")
 
@@ -456,14 +473,18 @@ def main():
     else:
         df_items = get_project_items(project_id, total_items)
 
+        # Filter out "គ្មានទិន្នន័យ" items for standard tabs
+        df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
+        df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
+
         if active_tab == "Full Inventory":
-            st.write("### Complete Inventory List")
-            st.dataframe(df_items, use_container_width=True)
+            st.write("### Complete Inventory List (Excluding គ្មានទិន្នន័យ)")
+            st.dataframe(df_valid_items, use_container_width=True)
 
         elif active_tab == "Update Item":
             st.write("### Update Item Details")
 
-            # --- SEARCH & LOAD SECTION (OUTSIDE FORM FOR INSTANT AUTO-REFRESH) ---
+            # SEARCH & LOAD SECTION
             search_col, load_btn_col = st.columns([3, 1])
             with search_col:
                 code_to_update = st.number_input(
@@ -474,11 +495,10 @@ def main():
                     key="update_item_code_input"
                 )
             with load_btn_col:
-                st.write("&#160;")  # Visual spacing alignment
+                st.write("&#160;")
                 if st.button("🔄 Load Data", use_container_width=True):
                     st.rerun()
 
-            # Retrieve database details for the selected parcel number
             current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
             curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
             curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
@@ -487,7 +507,7 @@ def main():
             curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
             default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
-            # --- EDIT FORM SECTION ---
+            # EDIT FORM
             with st.form("update_form"):
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
@@ -528,7 +548,6 @@ def main():
 
                     update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
 
-                    # Store summary data and trigger success modal popup
                     st.session_state["last_saved_summary"] = {
                         "code": str(code_to_update),
                         "status": new_status,
@@ -541,12 +560,12 @@ def main():
                     st.rerun()
 
         elif active_tab == "Not Yet Checked":
-            not_checked_df = df_items[df_items["Status"] == "មិនទាន់បានពិនិត្យ"]
+            not_checked_df = df_valid_items[df_valid_items["Status"] == "មិនទាន់បានពិនិត្យ"]
             st.write(f"### មិនទាន់បានពិនិត្យ (Total Left: {len(not_checked_df)})")
             st.dataframe(not_checked_df, use_container_width=True)
 
         elif active_tab == "Checked Items":
-            checked_df = df_items[df_items["Status"] == "បានពិនិត្យ"]
+            checked_df = df_valid_items[df_valid_items["Status"] == "បានពិនិត្យ"]
             st.write(f"### បានពិនិត្យ (Total Checked: {len(checked_df)})")
 
             search_code = st.number_input("Search ក្បាលដី in បានពិនិត្យ", min_value=0, max_value=total_items, value=0)
@@ -555,6 +574,10 @@ def main():
                 st.dataframe(filtered_df, use_container_width=True)
             else:
                 st.dataframe(checked_df, use_container_width=True)
+
+        elif active_tab == "No Data Items":
+            st.write(f"### 🚫 ក្បាលដីគ្មានទិន្នន័យ (Total: {len(df_no_data_items)})")
+            st.dataframe(df_no_data_items, use_container_width=True)
 
         elif active_tab == "Condition Summary":
             st.write("### 📊 Condition Summary & Analysis")
