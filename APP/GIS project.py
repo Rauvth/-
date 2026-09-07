@@ -32,7 +32,7 @@ def get_cambodia_now():
 
 
 def initialize_database():
-    """Sets up database tables including multi-user accounts and migrations."""
+    """Sets up database tables including multi-user accounts and migrations safely."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -48,13 +48,11 @@ def initialize_database():
         )
     """)
 
-    # Seed Default Admin if not exists
-    cursor.execute("SELECT id FROM users WHERE username = ?", (DEFAULT_ADMIN_USER,))
-    if not cursor.fetchone():
-        cursor.execute("""
-            INSERT INTO users (username, password, role, status, created_at)
-            VALUES (?, ?, 'admin', 'approved', ?)
-        """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
+    # Safely insert default admin if not exists (prevents IntegrityError crash)
+    cursor.execute("""
+        INSERT OR IGNORE INTO users (username, password, role, status, created_at)
+        VALUES (?, ?, 'admin', 'approved', ?)
+    """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
 
     # Projects Table
     cursor.execute("""
