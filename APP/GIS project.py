@@ -49,6 +49,12 @@ def initialize_database():
         )
     """)
 
+    # Safe migration check: Add temp_admin_expires column if missing in existing databases
+    cursor.execute("PRAGMA table_info(users)")
+    columns = [col[1] for col in cursor.fetchall()]
+    if "temp_admin_expires" not in columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
+
     # App Settings Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
