@@ -32,7 +32,7 @@ def get_cambodia_now():
 
 
 def initialize_database():
-    """Sets up database tables including multi-user accounts, temporary admin roles, and status management."""
+    """Sets up database tables including multi-user accounts, temporary admin roles, and status management safely."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -49,7 +49,7 @@ def initialize_database():
         )
     """)
 
-    # Migration: Check temp_admin_expires
+    # Migration: Check temp_admin_expires column
     cursor.execute("PRAGMA table_info(users)")
     columns = [col[1] for col in cursor.fetchall()]
     if "temp_admin_expires" not in columns:
@@ -63,7 +63,7 @@ def initialize_database():
         )
     """)
 
-    # Default App Settings
+    # Safely insert default settings via executemany
     default_settings = [
         ('app_title', '📦 កម្មវិធីបិតផ្សាយ'),
         ('loc_village', ''),
@@ -71,8 +71,9 @@ def initialize_database():
         ('loc_district', ''),
         ('loc_province', 'បាត់ដំបង')
     ]
-    for key, val in default_settings:
-        cursor.execute("INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)", (key, val))
+    cursor.executemany("""
+        INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)
+    """, default_settings)
 
     # Safely insert default protected admin if not exists
     cursor.execute("""
@@ -166,7 +167,7 @@ def set_location_settings(village, commune, district, province):
 
 
 def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", custom_timestamp=""):
-    """Records system actions into logs table."""
+    """Records system actions into logs table cleanly."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -425,6 +426,7 @@ def update_project_details(project_id, new_name, new_total_items):
 
 
 def delete_project(project_id):
+    """Safely cleans up logs, items, and project entries from DB."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM logs WHERE project_id = ?", (project_id,))
@@ -825,6 +827,7 @@ if current_role in ["admin", "temp_admin"]:
             st.markdown("### 🗑️ Delete Project")
             if st.button("⚠️ Delete Entire Project", type="primary"):
                 delete_project(active_project_id)
+                st.session_state.pop("active_project_id", None)
                 st.success(f"Project '{selected_project_name}' deleted!")
                 st.rerun()
 
