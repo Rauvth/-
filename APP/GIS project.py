@@ -530,11 +530,15 @@ def main():
     if st.session_state.get("show_save_success_dialog", False):
         show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
+    # Safe retrieval of session state values
+    current_username = st.session_state.get("username", "Guest")
+    current_role = st.session_state.get("role", "user") or "user"
+
     # Top Bar Header & User Info
     head_col1, head_col2 = st.columns([8, 2])
     with head_col1:
         st.title("📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង")
-        st.caption(f"Logged in as: **{st.session_state.get('username')}** ({st.session_state.get('role').upper()})")
+        st.caption(f"Logged in as: **{current_username}** ({current_role.upper()})")
     with head_col2:
         if st.button("Logout"):
             st.session_state["authenticated"] = False
@@ -560,7 +564,7 @@ def main():
         st.session_state["active_tab"] = "Full Inventory"
 
     # Navigation Drawer Menu
-    is_admin = (st.session_state.get("role") == "admin")
+    is_admin = (current_role == "admin")
 
     with st.expander("☰ Navigation & Settings (Click to Open/Close)", expanded=st.session_state["nav_expanded"]):
         cols = st.columns(5 if is_admin else 4)
