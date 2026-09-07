@@ -6,7 +6,7 @@ import streamlit as st
 import pandas as pd
 
 # ==============================================================================
-# 🔐 SYSTEM DEFAULT ADMIN
+# 🔐 SYSTEM DEFAULT ADMIN (PROTECTED ROOT ADMIN)
 # ==============================================================================
 DEFAULT_ADMIN_USER = "Ra Vuth"
 DEFAULT_ADMIN_PASS = "12354561"
@@ -32,7 +32,7 @@ def get_cambodia_now():
 
 
 def initialize_database():
-    """Sets up database tables including multi-user accounts and migrations safely."""
+    """Sets up database tables including multi-user accounts, temporary admin roles, and status management."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -44,11 +44,25 @@ def initialize_database():
             password TEXT NOT NULL,
             role TEXT NOT NULL DEFAULT 'user',
             status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT DEFAULT ''
+            created_at TEXT DEFAULT '',
+            temp_admin_expires TEXT DEFAULT ''
         )
     """)
 
-    # Safely insert default admin if not exists (prevents IntegrityError crash)
+    # App Settings Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO app_settings (key, value)
+        VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
+    """)
+
+    # Safely insert default protected admin if not exists
     cursor.execute("""
         INSERT OR IGNORE INTO users (username, password, role, status, created_at)
         VALUES (?, ?, 'admin', 'approved', ?)
@@ -98,6 +112,23 @@ def initialize_database():
     conn.close()
 
 
+def get_app_title():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
+
+
+def set_app_title(new_title):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('app_title', ?)", (new_title,))
+    conn.commit()
+    conn.close()
+
+
 def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", custom_timestamp=""):
     """Records system actions into logs table."""
     conn = sqlite3.connect(DB_NAME)
@@ -115,12 +146,34 @@ def log_activity(project_id, code, action_type, status="", phone="", notes="", c
 
 
 # ==============================================================================
-# 🔑 USER AUTHENTICATION & APPROVAL MANAGEMENT FUNCTIONS
+# 🔑 USER AUTHENTICATION & ADVANCED ROLE MANAGEMENT
 # ==============================================================================
-def get_user_from_db(username):
+def check_and_expire_temp_admins():
+    """Checks and demotes temporary admins whose admin duration has expired."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, password, role, status FROM users WHERE username = ?", (username,))
+    cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
+    rows = cursor.fetchall()
+
+    now = get_cambodia_now()
+    for row in rows:
+        user_id, username, expire_str = row
+        if expire_str:
+            try:
+                expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
+                if now >= expire_dt:
+                    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = ?", (user_id,))
+            except ValueError:
+                pass
+    conn.commit()
+    conn.close()
+
+
+def get_user_from_db(username):
+    check_and_expire_temp_admins()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = ?", (username,))
     row = cursor.fetchone()
     conn.close()
     return row
@@ -144,12 +197,13 @@ def register_user(username, password, requested_role):
 
 
 def get_all_users():
+    check_and_expire_temp_admins()
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, status, created_at FROM users ORDER BY id DESC")
+    cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
-    return pd.DataFrame(rows, columns=["ID", "Username", "Role", "Status", "Created At"])
+    return pd.DataFrame(rows, columns=["ID", "Username", "Role", "Status", "Created At", "Temp Admin Expires"])
 
 
 def update_user_status(user_id, status):
@@ -160,15 +214,40 @@ def update_user_status(user_id, status):
     conn.close()
 
 
+def delete_user_account(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def set_temporary_admin(user_id, expiration_dt):
+    exp_str = expiration_dt.strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET role = 'temp_admin', temp_admin_expires = ? WHERE id = ?", (exp_str, user_id))
+    conn.commit()
+    conn.close()
+
+
+def revoke_admin_role(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
 def render_auth_page():
-    """Renders the Login / Registration portal with role switching."""
+    """Renders Login / Registration with status checks for pending/inactive users."""
     st.title("🔐 Authentication & Registration Portal")
 
     mode = st.radio("Select Action", ["Log In", "Create New Account"], horizontal=True)
 
     if mode == "Log In":
         st.subheader("Sign In")
-        role_type = st.selectbox("Login Role Mode", ["Normal User", "Admin"])
+        role_type = st.selectbox("Login Role Mode", ["Normal User", "Admin / Temp Admin"])
 
         with st.form("login_form"):
             username = st.text_input("Username")
@@ -181,9 +260,9 @@ def render_auth_page():
                     db_role = user[3]
                     db_status = user[4]
 
-                    # Verify admin login role
-                    if role_type == "Admin" and db_role != "admin":
-                        st.error("This account does not have Admin privileges.")
+                    # Account Activity Check
+                    if db_status == "inactive":
+                        st.error("🔒 Your account is set to INACTIVE. Please contact the root admin to activate your account.")
                         return
 
                     if db_status == "pending":
@@ -193,6 +272,10 @@ def render_auth_page():
                     elif db_status == "rejected":
                         st.error("Your account registration request was rejected by the admin.")
                     elif db_status == "approved":
+                        if role_type == "Admin / Temp Admin" and db_role not in ["admin", "temp_admin"]:
+                            st.error("This account does not have Admin or Temp Admin privileges.")
+                            return
+
                         st.session_state["authenticated"] = True
                         st.session_state["username"] = username
                         st.session_state["role"] = db_role
@@ -228,7 +311,6 @@ def render_auth_page():
 
 
 def render_pending_waiting_screen(username):
-    """Real-time waiting screen for users awaiting admin approval."""
     st.title("⏳ Account Approval Pending")
 
     user = get_user_from_db(username)
@@ -245,7 +327,6 @@ def render_pending_waiting_screen(username):
         st.warning(f"Hello **{username}**, your account registration request is currently **PENDING** approval from an administrator.")
         st.info("Please wait on this screen. It will refresh automatically when approved.")
 
-        # Real-time polling check
         time.sleep(3)
         st.rerun()
 
@@ -292,6 +373,65 @@ def create_new_project(name, total_items):
         project_id, name, total_items = row[0], row[1], row[2]
     conn.close()
     return project_id, name, total_items
+
+
+def update_project_details(project_id, new_name, new_total_items):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE projects SET name = ?, total_items = ? WHERE id = ?", (new_name, new_total_items, project_id))
+        conn.commit()
+        conn.close()
+        return True, "Project updated successfully!"
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, "Project name already exists."
+
+
+def delete_project(project_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM logs WHERE project_id = ?", (project_id,))
+    cursor.execute("DELETE FROM items WHERE project_id = ?", (project_id,))
+    cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+def clear_history_logs(project_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM logs WHERE project_id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+def clear_conditions_data(project_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE items SET condition = '' WHERE project_id = ?", (project_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_item_by_code(project_id, code):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM items WHERE project_id = ? AND code = ?", (project_id, code))
+    conn.commit()
+    conn.close()
+
+
+def reset_single_item_data(project_id, code):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE items 
+        SET status = 'មិនទាន់បានពិនិត្យ', customer_phone = '', notes = '', condition = '', updated_at = '-'
+        WHERE project_id = ? AND code = ?
+    """, (project_id, code))
+    conn.commit()
+    conn.close()
 
 
 def get_project_items(project_id, total_items):
@@ -504,7 +644,7 @@ def switch_tab(tab_name):
 
 
 def main():
-    st.set_page_config(page_title="កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង", layout="wide")
+    st.set_page_config(page_title="Project Manager", layout="wide")
     apply_center_alignment()
     initialize_database()
 
@@ -530,15 +670,26 @@ def main():
     if st.session_state.get("show_save_success_dialog", False):
         show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
-    # Safe retrieval of session state values
+    # Real-time check of session state role
     current_username = st.session_state.get("username", "Guest")
-    current_role = st.session_state.get("role", "user") or "user"
+    user_data = get_user_from_db(current_username)
+    
+    if not user_data or user_data[4] == "inactive":
+        st.error("Your account has been deactivated or removed.")
+        st.session_state["authenticated"] = False
+        st.rerun()
 
-    # Top Bar Header & User Info
+    current_role = user_data[3]
+    st.session_state["role"] = current_role
+
+    is_admin = current_role in ["admin", "temp_admin"]
+    app_title = get_app_title()
+
+    # Header Bar
     head_col1, head_col2 = st.columns([8, 2])
     with head_col1:
-        st.title("📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង")
-        st.caption(f"Logged in as: **{current_username}** ({current_role.upper()})")
+        st.title(app_title)
+        st.caption(f"Logged in as: **{current_username}** ({current_role.upper().replace('_', ' ')})")
     with head_col2:
         if st.button("Logout"):
             st.session_state["authenticated"] = False
@@ -556,6 +707,8 @@ def main():
             st.success(msg_text)
         elif msg_type == "info":
             st.info(msg_text)
+        elif msg_type == "warning":
+            st.warning(msg_text)
         del st.session_state["msg"]
 
     st.subheader(f"Active Project: **{project_name}** (ក្បាលដីសរុប: {total_items})")
@@ -564,8 +717,6 @@ def main():
         st.session_state["active_tab"] = "Full Inventory"
 
     # Navigation Drawer Menu
-    is_admin = (current_role == "admin")
-
     with st.expander("☰ Navigation & Settings (Click to Open/Close)", expanded=st.session_state["nav_expanded"]):
         cols = st.columns(5 if is_admin else 4)
         with cols[0]:
@@ -594,42 +745,112 @@ def main():
 
         if is_admin:
             with cols[4]:
-                if st.button("👥 Admin Approval", use_container_width=True):
-                    switch_tab("User Approvals")
+                if st.button("👥 Admin Control", use_container_width=True):
+                    switch_tab("Admin Control")
 
     st.write("---")
 
     active_tab = st.session_state["active_tab"]
 
-    # Admin Panel Tab for Account Approval
-    if active_tab == "User Approvals" and is_admin:
-        st.write("### 👥 User Account Registration Approvals")
+    # Admin Control Panel
+    if active_tab == "Admin Control" and is_admin:
+        st.write("### 👥 Admin Control & User Management")
+
+        # System Title Customization
+        st.write("#### ✏️ Change Application Title")
+        with st.form("admin_title_form"):
+            new_title_input = st.text_input("Application Title", value=app_title)
+            save_title_btn = st.form_submit_button("Update App Title")
+            if save_title_btn and new_title_input.strip():
+                set_app_title(new_title_input.strip())
+                st.session_state["msg"] = ("success", "App title updated successfully!")
+                st.rerun()
+
+        st.write("---")
+        st.write("#### 👥 Manage User Accounts & Permissions")
         df_users = get_all_users()
         st.dataframe(df_users, use_container_width=True)
 
-        pending_users = df_users[df_users["Status"] == "pending"]
-        if not pending_users.empty:
-            st.write("#### Pending Account Requests")
-            for _, row in pending_users.iterrows():
-                u_id, u_name, u_role = row["ID"], row["Username"], row["Role"]
-                p_col1, p_col2, p_col3 = st.columns([3, 1, 1])
-                with p_col1:
-                    st.write(f"**{u_name}** (Requested Role: `{u_role}`)")
-                with p_col2:
-                    if st.button(f"Approve", key=f"app_{u_id}"):
-                        update_user_status(u_id, "approved")
-                        st.success(f"Approved {u_name}")
-                        st.rerun()
-                with p_col3:
-                    if st.button(f"Reject", key=f"rej_{u_id}"):
-                        update_user_status(u_id, "rejected")
-                        st.warning(f"Rejected {u_name}")
-                        st.rerun()
+        st.write("##### User Account Actions")
+        target_user = st.selectbox("Select User Account to Modify", options=df_users["Username"].tolist())
+
+        target_row = df_users[df_users["Username"] == target_user].iloc[0]
+        t_id = target_row["ID"]
+        t_role = target_row["Role"]
+        t_status = target_row["Status"]
+
+        # Immunity Protection Check
+        if target_user == DEFAULT_ADMIN_USER:
+            st.info(f"🛡️ **{DEFAULT_ADMIN_USER}** is the Root Administrator and cannot be edited or modified by anyone.")
         else:
-            st.info("No pending user registration requests.")
+            action_c1, action_c2, action_c3 = st.columns(3)
+
+            with action_c1:
+                st.write("**Account Active Status**")
+                if t_status == "approved":
+                    if st.button("Set to INACTIVE", use_container_width=True):
+                        update_user_status(t_id, "inactive")
+                        st.session_state["msg"] = ("warning", f"User {target_user} is now INACTIVE.")
+                        st.rerun()
+                else:
+                    if st.button("Set to ACTIVE (Approve)", use_container_width=True):
+                        update_user_status(t_id, "approved")
+                        st.session_state["msg"] = ("success", f"User {target_user} activated.")
+                        st.rerun()
+
+            with action_c2:
+                st.write("**Grant Temporary Admin Power**")
+                hours = st.number_input("Admin Duration (Hours)", min_value=1, max_value=720, value=2)
+                if st.button("Give Temporary Admin", use_container_width=True):
+                    exp_dt = get_cambodia_now() + datetime.timedelta(hours=int(hours))
+                    set_temporary_admin(t_id, exp_dt)
+                    st.session_state["msg"] = ("success", f"Granted Temp Admin to {target_user} until {exp_dt.strftime('%d/%m/%Y %I:%M %p')}")
+                    st.rerun()
+
+                if t_role == "temp_admin":
+                    if st.button("Revoke Temp Admin Immediately", use_container_width=True):
+                        revoke_admin_role(t_id)
+                        st.session_state["msg"] = ("info", f"Revoked admin privileges from {target_user}")
+                        st.rerun()
+
+            with action_c3:
+                st.write("**Permanent Account Deletion**")
+                if st.button(f"🚨 Delete Account '{target_user}'", use_container_width=True):
+                    delete_user_account(t_id)
+                    st.session_state["msg"] = ("warning", f"Account '{target_user}' permanently deleted.")
+                    st.rerun()
 
     elif active_tab == "Project Settings":
-        st.write("### ⚙️ Project Settings")
+        st.write("### ⚙️ Project Settings & Administration")
+
+        if is_admin:
+            st.write("#### ✏️ Edit Active Project Details")
+            with st.form("edit_project_form"):
+                edit_name = st.text_input("Project Name", value=project_name)
+                edit_total = st.number_input("Total Items (ក្បាលដីសរុប)", min_value=1, value=total_items)
+                update_proj_btn = st.form_submit_button("Update Project Info")
+
+                if update_proj_btn:
+                    success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
+                    if success:
+                        st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
+                        st.session_state["msg"] = ("success", "Project details updated!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+            st.write("---")
+            st.write("#### 🗑️ Delete Project")
+            st.warning("Deleting this project will permanently remove all associated items and log history.")
+            if st.button("🚨 Delete Active Project Completely", use_container_width=True):
+                delete_project(project_id)
+                st.session_state.pop("active_project", None)
+                st.session_state["show_startup_popup"] = True
+                st.session_state["msg"] = ("warning", f"Project '{project_name}' has been deleted.")
+                st.rerun()
+
+        st.write("---")
+        st.write("#### 🔄 Switch or Create Project")
         render_project_selector(key_prefix="tab")
 
     else:
@@ -641,6 +862,29 @@ def main():
         if active_tab == "Full Inventory":
             st.write("### Complete Inventory List (Excluding គ្មានទិន្នន័យ)")
             st.dataframe(df_valid_items, use_container_width=True)
+
+            if is_admin:
+                st.write("---")
+                st.write("### 🛠️ Admin Inventory Controls")
+                inv_col1, inv_col2 = st.columns(2)
+
+                with inv_col1:
+                    st.write("#### ➕ Add Items to Inventory")
+                    add_qty = st.number_input("How many items to add?", min_value=1, value=1, step=1, key="add_qty_input")
+                    if st.button(f"Add {add_qty} Item(s)", use_container_width=True):
+                        new_total = total_items + int(add_qty)
+                        update_project_details(project_id, project_name, new_total)
+                        st.session_state["active_project"] = (project_id, project_name, new_total)
+                        st.session_state["msg"] = ("success", f"Added {add_qty} item(s). New total count is {new_total}.")
+                        st.rerun()
+
+                with inv_col2:
+                    st.write("#### 🗑️ Delete Specific Item")
+                    del_code = st.number_input("Enter Item Code (ក្បាលដី) to Delete", min_value=1, max_value=total_items, step=1, key="del_code_input")
+                    if st.button(f"Delete Item #{del_code}", use_container_width=True):
+                        delete_item_by_code(project_id, int(del_code))
+                        st.session_state["msg"] = ("success", f"Item #{del_code} permanently removed.")
+                        st.rerun()
 
         elif active_tab == "Update Item":
             st.write("### Update Item Details")
@@ -656,7 +900,7 @@ def main():
                 )
             with load_btn_col:
                 st.write("&#160;")
-                if st.button("🔄 Load Data", use_container_width=True):
+                if st.button("🔄 Refresh Data", use_container_width=True):
                     st.rerun()
 
             current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
@@ -666,6 +910,13 @@ def main():
 
             curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
             default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+
+            if st.session_state.get("clear_form_trigger", False):
+                curr_status = "មិនទាន់បានពិនិត្យ"
+                curr_phone = ""
+                curr_notes = ""
+                default_conditions = []
+                st.session_state["clear_form_trigger"] = False
 
             with st.form("update_form"):
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
@@ -691,7 +942,16 @@ def main():
                 with time_col:
                     selected_time = st.time_input("Update Time", value=current_cambodia_dt.time())
 
-                submitted = st.form_submit_button("Save Changes")
+                btn_c1, btn_c2 = st.columns(2)
+                with btn_c1:
+                    submitted = st.form_submit_button("Save Changes", use_container_width=True)
+                with btn_c2:
+                    clear_form_btn = st.form_submit_button("🧹 Clear Form Inputs", use_container_width=True)
+
+                if clear_form_btn:
+                    st.session_state["clear_form_trigger"] = True
+                    st.rerun()
+
                 if submitted:
                     new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
 
@@ -716,6 +976,14 @@ def main():
                         "timestamp": formatted_dt
                     }
                     st.session_state["show_save_success_dialog"] = True
+                    st.rerun()
+
+            if is_admin:
+                st.write("---")
+                st.write("#### 🧹 Admin: Clear Item Data")
+                if st.button(f"Reset Item #{code_to_update} Back to Default", use_container_width=True):
+                    reset_single_item_data(project_id, code_to_update)
+                    st.session_state["msg"] = ("success", f"Item #{code_to_update} data cleared successfully.")
                     st.rerun()
 
         elif active_tab == "Not Yet Checked":
@@ -760,6 +1028,14 @@ def main():
             summary_df = pd.DataFrame(summary_data)
             st.dataframe(summary_df, use_container_width=True)
 
+            if is_admin:
+                st.write("---")
+                st.write("#### 🧹 Admin Controls")
+                if st.button("Clear All Condition Summaries from this Project", use_container_width=True):
+                    clear_conditions_data(project_id)
+                    st.session_state["msg"] = ("success", "Condition data cleared successfully!")
+                    st.rerun()
+
         elif active_tab == "History Log":
             st.write("### 📜 Activity History Log")
             df_history = get_project_history(project_id)
@@ -767,6 +1043,14 @@ def main():
                 st.dataframe(df_history, use_container_width=True)
             else:
                 st.info("No activity logged for this project yet.")
+
+            if is_admin:
+                st.write("---")
+                st.write("#### 🧹 Admin Controls")
+                if st.button("Clear History Log for this Project", use_container_width=True):
+                    clear_history_logs(project_id)
+                    st.session_state["msg"] = ("success", "History log cleared successfully!")
+                    st.rerun()
 
 
 if __name__ == "__main__":
