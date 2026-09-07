@@ -1,15 +1,15 @@
 import sqlite3
 import datetime
+import time
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
 
 # ==============================================================================
-# 🔐 AUTHENTICATION SETTINGS (CHANGE YOUR USERNAME & PASSWORD HERE)
+# 🔐 SYSTEM DEFAULT ADMIN
 # ==============================================================================
-USER_CREDENTIALS = {
-    "Ra Vuth": "12354561"  # Format: "USERNAME": "PASSWORD"
-}
+DEFAULT_ADMIN_USER = "Ra Vuth"
+DEFAULT_ADMIN_PASS = "12354561"
 # ==============================================================================
 
 DB_NAME = "project_manager.db"
@@ -27,15 +27,36 @@ CONDITION_OPTIONS = [
 
 
 def get_cambodia_now():
-    """Returns the current datetime in Cambodia (Asia/Phnom_Penh) timezone."""
+    """Returns current datetime in Cambodia timezone."""
     return datetime.datetime.now(CAMBODIA_TZ)
 
 
 def initialize_database():
-    """Sets up database tables and safely migrates missing columns."""
+    """Sets up database tables including multi-user accounts and migrations."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
+    # User Accounts Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT DEFAULT ''
+        )
+    """)
+
+    # Seed Default Admin if not exists
+    cursor.execute("SELECT id FROM users WHERE username = ?", (DEFAULT_ADMIN_USER,))
+    if not cursor.fetchone():
+        cursor.execute("""
+            INSERT INTO users (username, password, role, status, created_at)
+            VALUES (?, ?, 'admin', 'approved', ?)
+        """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
+
+    # Projects Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,6 +65,7 @@ def initialize_database():
         )
     """)
 
+    # Items Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,13 +80,7 @@ def initialize_database():
         )
     """)
 
-    cursor.execute("PRAGMA table_info(items)")
-    items_columns = [column[1] for column in cursor.fetchall()]
-    if "updated_at" not in items_columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN updated_at TEXT DEFAULT ''")
-    if "condition" not in items_columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN condition TEXT DEFAULT ''")
-
+    # Logs Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,24 +96,12 @@ def initialize_database():
         )
     """)
 
-    cursor.execute("PRAGMA table_info(logs)")
-    logs_columns = [column[1] for column in cursor.fetchall()]
-
-    if "status" not in logs_columns:
-        cursor.execute("ALTER TABLE logs ADD COLUMN status TEXT DEFAULT ''")
-    if "customer_phone" not in logs_columns:
-        cursor.execute("ALTER TABLE logs ADD COLUMN customer_phone TEXT DEFAULT ''")
-    if "notes" not in logs_columns:
-        cursor.execute("ALTER TABLE logs ADD COLUMN notes TEXT DEFAULT ''")
-    if "condition" not in logs_columns:
-        cursor.execute("ALTER TABLE logs ADD COLUMN condition TEXT DEFAULT ''")
-
     conn.commit()
     conn.close()
 
 
 def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", custom_timestamp=""):
-    """Records an action in the database using Cambodia local time by default."""
+    """Records system actions into logs table."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -112,33 +116,162 @@ def log_activity(project_id, code, action_type, status="", phone="", notes="", c
     conn.close()
 
 
-def check_password():
-    """Returns True if the user has logged in successfully."""
-    if "authenticated" not in st.session_state:
-        st.session_state["authenticated"] = False
-
-    if st.session_state["authenticated"]:
-        return True
-
-    st.title("🔒 App Login Required")
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        login_btn = st.form_submit_button("Log In")
-
-        if login_btn:
-            if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
-                st.session_state["authenticated"] = True
-                st.session_state["show_startup_popup"] = True
-                st.success("Login successful!")
-                st.rerun()
-            else:
-                st.error("Incorrect username or password.")
-    return False
+# ==============================================================================
+# 🔑 USER AUTHENTICATION & APPROVAL MANAGEMENT FUNCTIONS
+# ==============================================================================
+def get_user_from_db(username):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, password, role, status FROM users WHERE username = ?", (username,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
 
 
+def register_user(username, password, requested_role):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+    try:
+        cursor.execute("""
+            INSERT INTO users (username, password, role, status, created_at)
+            VALUES (?, ?, ?, 'pending', ?)
+        """, (username, password, requested_role, created_at))
+        conn.commit()
+        conn.close()
+        return True, "Registration submitted!"
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, "Username already exists. Please choose a different one."
+
+
+def get_all_users():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role, status, created_at FROM users ORDER BY id DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return pd.DataFrame(rows, columns=["ID", "Username", "Role", "Status", "Created At"])
+
+
+def update_user_status(user_id, status):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET status = ? WHERE id = ?", (status, user_id))
+    conn.commit()
+    conn.close()
+
+
+def render_auth_page():
+    """Renders the Login / Registration portal with role switching."""
+    st.title("🔐 Authentication & Registration Portal")
+
+    mode = st.radio("Select Action", ["Log In", "Create New Account"], horizontal=True)
+
+    if mode == "Log In":
+        st.subheader("Sign In")
+        role_type = st.selectbox("Login Role Mode", ["Normal User", "Admin"])
+
+        with st.form("login_form"):
+            username = st.text_input("Username")
+            password = st.text_input("Password", type="password")
+            login_btn = st.form_submit_button("Log In")
+
+            if login_btn:
+                user = get_user_from_db(username)
+                if user and user[2] == password:
+                    db_role = user[3]
+                    db_status = user[4]
+
+                    # Verify admin login role
+                    if role_type == "Admin" and db_role != "admin":
+                        st.error("This account does not have Admin privileges.")
+                        return
+
+                    if db_status == "pending":
+                        st.session_state["pending_user"] = username
+                        st.session_state["authenticated"] = False
+                        st.rerun()
+                    elif db_status == "rejected":
+                        st.error("Your account registration request was rejected by the admin.")
+                    elif db_status == "approved":
+                        st.session_state["authenticated"] = True
+                        st.session_state["username"] = username
+                        st.session_state["role"] = db_role
+                        st.session_state["show_startup_popup"] = True
+                        st.session_state.pop("pending_user", None)
+                        st.success("Login successful!")
+                        st.rerun()
+                else:
+                    st.error("Invalid username or password.")
+
+    elif mode == "Create New Account":
+        st.subheader("Request New Account")
+        requested_role = st.selectbox("Select Desired Role", ["user", "admin"])
+
+        with st.form("register_form"):
+            new_user = st.text_input("Username")
+            new_pass = st.text_input("Password", type="password")
+            confirm_pass = st.text_input("Confirm Password", type="password")
+            reg_btn = st.form_submit_button("Submit Account Request")
+
+            if reg_btn:
+                if not new_user or not new_pass:
+                    st.error("Please fill in all fields.")
+                elif new_pass != confirm_pass:
+                    st.error("Passwords do not match!")
+                else:
+                    success, msg = register_user(new_user, new_pass, requested_role)
+                    if success:
+                        st.session_state["pending_user"] = new_user
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+
+def render_pending_waiting_screen(username):
+    """Real-time waiting screen for users awaiting admin approval."""
+    st.title("⏳ Account Approval Pending")
+
+    user = get_user_from_db(username)
+    if not user:
+        st.error("Account not found.")
+        if st.button("Back to Login"):
+            st.session_state.pop("pending_user", None)
+            st.rerun()
+        return
+
+    status = user[4]
+
+    if status == "pending":
+        st.warning(f"Hello **{username}**, your account registration request is currently **PENDING** approval from an administrator.")
+        st.info("Please wait on this screen. It will refresh automatically when approved.")
+
+        # Real-time polling check
+        time.sleep(3)
+        st.rerun()
+
+    elif status == "approved":
+        st.success(f"🎉 Great news, **{username}**! Your account has been approved by the admin.")
+        if st.button("Continue to Application", use_container_width=True):
+            st.session_state["authenticated"] = True
+            st.session_state["username"] = username
+            st.session_state["role"] = user[3]
+            st.session_state["show_startup_popup"] = True
+            st.session_state.pop("pending_user", None)
+            st.rerun()
+
+    elif status == "rejected":
+        st.error(f"Sorry **{username}**, your account registration request was rejected by an administrator.")
+        if st.button("Return to Login", use_container_width=True):
+            st.session_state.pop("pending_user", None)
+            st.rerun()
+
+
+# ==============================================================================
+# 📊 DATABASE UTILITIES
+# ==============================================================================
 def get_all_projects():
-    """Fetches list of all existing projects."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT id, name, total_items FROM projects")
@@ -148,7 +281,6 @@ def get_all_projects():
 
 
 def create_new_project(name, total_items):
-    """Creates a new project or returns existing if name matches."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     try:
@@ -165,7 +297,6 @@ def create_new_project(name, total_items):
 
 
 def get_project_items(project_id, total_items):
-    """Returns a full DataFrame of items for a given project with Khmer column titles."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -201,14 +332,12 @@ def get_project_items(project_id, total_items):
 
 
 def is_no_data(row):
-    """Checks if an item is marked as គ្មានទិន្នន័យ via Condition or Notes."""
     cond = str(row["Condition"])
     notes = str(row["ផ្សេងៗ"])
     return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
 
 
 def update_item_in_db(project_id, code, status, phone, notes, condition, custom_timestamp):
-    """Inserts or updates an item's details, condition, date/time, and logs changes."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -243,7 +372,6 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, custom_
 
 
 def get_project_history(project_id):
-    """Fetches all history logs for the active project with Khmer column headers."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -276,7 +404,6 @@ def get_project_history(project_id):
 
 
 def render_project_selector(key_prefix="modal"):
-    """Reusable project selection/creation UI."""
     projects = get_all_projects()
     mode = st.radio("Select Option", ["Select Existing Project", "Create New Project"], key=f"{key_prefix}_mode")
 
@@ -309,12 +436,8 @@ def render_project_selector(key_prefix="modal"):
             st.rerun()
 
 
-# ==============================================================================
-# 🪟 SUCCESS POPUP MODAL DIALOG
-# ==============================================================================
 @st.dialog(" ")
 def show_success_dialog(summary):
-    """Displays a clean modal window styled like the NetBird confirmation popup."""
     st.markdown("""
         <div style="text-align: center; padding: 10px 0;">
             <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -358,7 +481,6 @@ else:
 
 
 def apply_center_alignment():
-    """Injects custom CSS to align UI text, headings, inputs, and tables to the center."""
     st.markdown("""
         <style>
             .stAppViewContainer, .stMarkdown, h1, h2, h3, h4, h5, h6, p, label {
@@ -378,7 +500,6 @@ def apply_center_alignment():
 
 
 def switch_tab(tab_name):
-    """Helper function to switch active tab and automatically collapse navigation menu."""
     st.session_state["active_tab"] = tab_name
     st.session_state["nav_expanded"] = False
     st.rerun()
@@ -387,37 +508,42 @@ def switch_tab(tab_name):
 def main():
     st.set_page_config(page_title="កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង", layout="wide")
     apply_center_alignment()
-
-    if not check_password():
-        return
-
     initialize_database()
 
-    # Initialize navigation expander state
+    # Route 1: Pending User Waiting Screen
+    if "pending_user" in st.session_state:
+        render_pending_waiting_screen(st.session_state["pending_user"])
+        return
+
+    # Route 2: Unauthenticated - Show Login / Registration Portal
+    if not st.session_state.get("authenticated", False):
+        render_auth_page()
+        return
+
+    # Route 3: Authenticated App Logic
     if "nav_expanded" not in st.session_state:
         st.session_state["nav_expanded"] = False
 
-    # Mandatory Startup Pop-Up Trigger
     if st.session_state.get("show_startup_popup", True) or "active_project" not in st.session_state:
         startup_project_modal()
         if "active_project" not in st.session_state:
             return
 
-    # Trigger Save Success Modal Dialog if set
     if st.session_state.get("show_save_success_dialog", False):
         show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
-    # Top Header & Logout
+    # Top Bar Header & User Info
     head_col1, head_col2 = st.columns([8, 2])
     with head_col1:
         st.title("📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង")
+        st.caption(f"Logged in as: **{st.session_state.get('username')}** ({st.session_state.get('role').upper()})")
     with head_col2:
         if st.button("Logout"):
             st.session_state["authenticated"] = False
             st.session_state["show_startup_popup"] = True
             st.session_state.pop("active_project", None)
-            st.session_state.pop("last_saved_summary", None)
-            st.session_state.pop("show_save_success_dialog", None)
+            st.session_state.pop("username", None)
+            st.session_state.pop("role", None)
             st.rerun()
 
     project_id, project_name, total_items = st.session_state["active_project"]
@@ -435,45 +561,78 @@ def main():
     if "active_tab" not in st.session_state:
         st.session_state["active_tab"] = "Full Inventory"
 
-    # Navigation Menu Drawer (Automatically closes upon clicking any sub-tab button)
-    with st.expander("☰ Navigation & Project Settings (Click to Open/Close)", expanded=st.session_state["nav_expanded"]):
-        nav_btn_col1, nav_btn_col2, nav_btn_col3, nav_btn_col4 = st.columns(4)
-        with nav_btn_col1:
+    # Navigation Drawer Menu
+    is_admin = (st.session_state.get("role") == "admin")
+
+    with st.expander("☰ Navigation & Settings (Click to Open/Close)", expanded=st.session_state["nav_expanded"]):
+        cols = st.columns(5 if is_admin else 4)
+        with cols[0]:
             if st.button("📋 Full Inventory", use_container_width=True):
                 switch_tab("Full Inventory")
             if st.button("✏️ Update Item", use_container_width=True):
                 switch_tab("Update Item")
 
-        with nav_btn_col2:
+        with cols[1]:
             if st.button("⏳ មិនទាន់បានពិនិត្យ", use_container_width=True):
                 switch_tab("Not Yet Checked")
             if st.button("✅ បានពិនិត្យ", use_container_width=True):
                 switch_tab("Checked Items")
 
-        with nav_btn_col3:
+        with cols[2]:
             if st.button("🚫 ក្បាលដីគ្មានទិន្នន័យ", use_container_width=True):
                 switch_tab("No Data Items")
             if st.button("📊 Condition Summary", use_container_width=True):
                 switch_tab("Condition Summary")
 
-        with nav_btn_col4:
+        with cols[3]:
             if st.button("📜 History Log", use_container_width=True):
                 switch_tab("History Log")
             if st.button("⚙️ Project Settings", use_container_width=True):
                 switch_tab("Project Settings")
 
+        if is_admin:
+            with cols[4]:
+                if st.button("👥 Admin Approval", use_container_width=True):
+                    switch_tab("User Approvals")
+
     st.write("---")
 
     active_tab = st.session_state["active_tab"]
 
-    if active_tab == "Project Settings":
+    # Admin Panel Tab for Account Approval
+    if active_tab == "User Approvals" and is_admin:
+        st.write("### 👥 User Account Registration Approvals")
+        df_users = get_all_users()
+        st.dataframe(df_users, use_container_width=True)
+
+        pending_users = df_users[df_users["Status"] == "pending"]
+        if not pending_users.empty:
+            st.write("#### Pending Account Requests")
+            for _, row in pending_users.iterrows():
+                u_id, u_name, u_role = row["ID"], row["Username"], row["Role"]
+                p_col1, p_col2, p_col3 = st.columns([3, 1, 1])
+                with p_col1:
+                    st.write(f"**{u_name}** (Requested Role: `{u_role}`)")
+                with p_col2:
+                    if st.button(f"Approve", key=f"app_{u_id}"):
+                        update_user_status(u_id, "approved")
+                        st.success(f"Approved {u_name}")
+                        st.rerun()
+                with p_col3:
+                    if st.button(f"Reject", key=f"rej_{u_id}"):
+                        update_user_status(u_id, "rejected")
+                        st.warning(f"Rejected {u_name}")
+                        st.rerun()
+        else:
+            st.info("No pending user registration requests.")
+
+    elif active_tab == "Project Settings":
         st.write("### ⚙️ Project Settings")
         render_project_selector(key_prefix="tab")
 
     else:
         df_items = get_project_items(project_id, total_items)
 
-        # Filter out "គ្មានទិន្នន័យ" items for standard tabs
         df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
         df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
@@ -484,7 +643,6 @@ def main():
         elif active_tab == "Update Item":
             st.write("### Update Item Details")
 
-            # SEARCH & LOAD SECTION
             search_col, load_btn_col = st.columns([3, 1])
             with search_col:
                 code_to_update = st.number_input(
@@ -507,7 +665,6 @@ def main():
             curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
             default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
-            # EDIT FORM
             with st.form("update_form"):
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
