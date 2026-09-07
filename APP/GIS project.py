@@ -25,6 +25,23 @@ CONDITION_OPTIONS = [
     "គ្មានហត្ថលេខា"
 ]
 
+ERR_NAME_OPTIONS = [
+    "ខុសឈ្មោះប្ដី",
+    "ខុសឈ្មោះប្រពន្ធ",
+    "ខុសថ្ងៃខែឆ្នាំកំណើតប្ដី",
+    "ខុសថ្ងៃខែឆ្នាំកំណើតប្រពន្ធ",
+    "ខុសឈ្មោះឪពុកខាងប្ដី",
+    "ខុសឈ្មោះឪពុកខាងប្រពន្ធ",
+    "ខុសឈ្មោះម្ដាយខាងប្ដី",
+    "ខុសឈ្មោះម្ដាយខាងប្រពន្ធ",
+    "ខុសថ្ងៃខែឆ្នាំកំណើតឪពុកខាងប្ដី",
+    "ខុសថ្ងៃខែឆ្នាំកំណើតឪពុកខាងប្រពន្ធ",
+    "ខុសថ្ងៃខែឆ្នាំកំណើម្ដាយខាងប្ដី",
+    "ខុសថ្ងៃខែឆ្នាំកំណើតម្ដាយខាងប្រពន្ធ",
+    "ខុសអស័យដ្ឋានកំណើត",
+    "ខុសអស័យដ្ឋានបច្ចុប្បន្ន"
+]
+
 
 def get_cambodia_now():
     """Returns current datetime in Cambodia timezone."""
@@ -49,8 +66,8 @@ def initialize_database():
     """)
 
     cursor.execute("PRAGMA table_info(users)")
-    columns = [col[1] for col in cursor.fetchall()]
-    if "temp_admin_expires" not in columns:
+    user_columns = [col[1] for col in cursor.fetchall()]
+    if "temp_admin_expires" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
 
     cursor.execute("""
@@ -88,9 +105,15 @@ def initialize_database():
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             condition TEXT DEFAULT '',
+            name_errors TEXT DEFAULT '',
             FOREIGN KEY (project_id) REFERENCES projects (id)
         )
     """)
+
+    cursor.execute("PRAGMA table_info(items)")
+    item_columns = [col[1] for col in cursor.fetchall()]
+    if "name_errors" not in item_columns:
+        cursor.execute("ALTER TABLE items ADD COLUMN name_errors TEXT DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS logs (
@@ -102,10 +125,16 @@ def initialize_database():
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             condition TEXT DEFAULT '',
+            name_errors TEXT DEFAULT '',
             timestamp TEXT,
             FOREIGN KEY (project_id) REFERENCES projects (id)
         )
     """)
+
+    cursor.execute("PRAGMA table_info(logs)")
+    log_columns = [col[1] for col in cursor.fetchall()]
+    if "name_errors" not in log_columns:
+        cursor.execute("ALTER TABLE logs ADD COLUMN name_errors TEXT DEFAULT ''")
 
     conn.commit()
     conn.close()
@@ -128,15 +157,15 @@ def set_app_title(new_title):
     conn.close()
 
 
-def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", custom_timestamp=""):
+def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", name_errors="", custom_timestamp=""):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     timestamp = custom_timestamp if custom_timestamp else get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
 
     cursor.execute("""
-        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (project_id, code, action_type, status, phone, notes, condition, timestamp))
+        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (project_id, code, action_type, status, phone, notes, condition, name_errors, timestamp))
 
     conn.commit()
     conn.close()
@@ -200,31 +229,6 @@ def get_all_users():
     return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
 
 
-def update_user_status(user_id, status):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET status = ? WHERE id = ?", (status, user_id))
-    conn.commit()
-    conn.close()
-
-
-def delete_user_account(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-
-def set_temporary_admin(user_id, expiration_dt):
-    exp_str = expiration_dt.strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET role = 'temp_admin', temp_admin_expires = ? WHERE id = ?", (exp_str, user_id))
-    conn.commit()
-    conn.close()
-
-
 def get_all_projects():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -265,75 +269,29 @@ def update_project_details(project_id, new_name, new_total_items):
         return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
-def delete_project(project_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM logs WHERE project_id = ?", (project_id,))
-    cursor.execute("DELETE FROM items WHERE project_id = ?", (project_id,))
-    cursor.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-    conn.commit()
-    conn.close()
-
-
-def clear_history_logs(project_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM logs WHERE project_id = ?", (project_id,))
-    conn.commit()
-    conn.close()
-
-
-def clear_conditions_data(project_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE items SET condition = '' WHERE project_id = ?", (project_id,))
-    conn.commit()
-    conn.close()
-
-
-def delete_item_by_code(project_id, code):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM items WHERE project_id = ? AND code = ?", (project_id, code))
-    conn.commit()
-    conn.close()
-
-
-def reset_single_item_data(project_id, code):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE items 
-        SET status = 'មិនទាន់បានពិនិត្យ', customer_phone = '', notes = '', condition = '', updated_at = '-'
-        WHERE project_id = ? AND code = ?
-    """, (project_id, code))
-    conn.commit()
-    conn.close()
-
-
 def get_project_items(project_id, total_items):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT code, status, updated_at, customer_phone, notes, condition 
+        SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
         FROM items 
         WHERE project_id = ? 
         ORDER BY code ASC
     """, (project_id,))
 
-    existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5]) for row in cursor.fetchall()}
+    existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
     conn.close()
 
     data = []
     for code in range(1, total_items + 1):
         if code in existing_items:
-            status, updated_at, phone, notes, condition = existing_items[code]
+            status, updated_at, phone, notes, condition, name_errs = existing_items[code]
             if status in ["Not Yet Checked", ""]:
                 status = "មិនទាន់បានពិនិត្យ"
             elif status == "Checked":
                 status = "បានពិនិត្យ"
         else:
-            status, updated_at, phone, notes, condition = "មិនទាន់បានពិនិត្យ", "-", "", "", ""
+            status, updated_at, phone, notes, condition, name_errs = "មិនទាន់បានពិនិត្យ", "-", "", "", "", ""
 
         data.append({
             "ក្បាលដី": code,
@@ -341,6 +299,7 @@ def get_project_items(project_id, total_items):
             "លេខទូស័ព្ទ": phone,
             "ផ្សេងៗ": notes,
             "លក្ខខណ្ឌ": condition if condition else "ធម្មតា",
+            "ព័ត៌មានខុសឆ្គង": name_errs if name_errs else "គ្មាន",
             "បច្ចុប្បន្នភាពចុងក្រោយ": updated_at if updated_at else "-"
         })
     return pd.DataFrame(data)
@@ -352,7 +311,7 @@ def is_no_data(row):
     return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
 
 
-def update_item_in_db(project_id, code, status, phone, notes, condition, custom_timestamp):
+def update_item_in_db(project_id, code, status, phone, notes, condition, name_errors, custom_timestamp):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM items WHERE project_id = ? AND code = ?", (project_id, code))
@@ -360,14 +319,14 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, custom_
 
     if item:
         cursor.execute("""
-            UPDATE items SET status = ?, updated_at = ?, customer_phone = ?, notes = ?, condition = ? 
+            UPDATE items SET status = ?, updated_at = ?, customer_phone = ?, notes = ?, condition = ?, name_errors = ?
             WHERE id = ?
-        """, (status, custom_timestamp, phone, notes, condition, item[0]))
+        """, (status, custom_timestamp, phone, notes, condition, name_errors, item[0]))
     else:
         cursor.execute("""
-            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition) 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (project_id, code, status, custom_timestamp, phone, notes, condition))
+            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
 
     conn.commit()
     conn.close()
@@ -380,6 +339,7 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, custom_
         phone=phone,
         notes=notes,
         condition=condition,
+        name_errors=name_errors,
         custom_timestamp=custom_timestamp
     )
 
@@ -388,7 +348,7 @@ def get_project_history(project_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT timestamp, code, action_type, status, customer_phone, notes, condition 
+        SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
         FROM logs 
         WHERE project_id = ? 
         ORDER BY id DESC
@@ -411,7 +371,8 @@ def get_project_history(project_id):
             "ស្ថានភាព": log_status if log_status else "",
             "លេខទូស័ព្ទ": log[4] if log[4] else "",
             "ផ្សេងៗ": log[5] if log[5] else "",
-            "លក្ខខណ្ឌ": log[6] if log[6] else "ធម្មតា"
+            "លក្ខខណ្ឌ": log[6] if log[6] else "ធម្មតា",
+            "ព័ត៌មានខុសឆ្គង": log[7] if log[7] else "គ្មាន"
         })
     return pd.DataFrame(data)
 
@@ -432,16 +393,6 @@ def inject_custom_css():
                 background: #0F172A !important;
             }
 
-            /* Custom Slate Cards */
-            .slate-card {
-                background-color: #1E293B;
-                border: 1px solid #334155;
-                border-radius: 12px;
-                padding: 1.25rem;
-                margin-bottom: 1rem;
-            }
-
-            /* Slate Metric Badges */
             .slate-metric {
                 background: #1E293B;
                 border-left: 4px solid #10B981;
@@ -459,7 +410,6 @@ def inject_custom_css():
                 font-weight: 700;
             }
 
-            /* Form & Inputs */
             .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
                 background-color: #0F172A !important;
                 color: #F8FAFC !important;
@@ -467,7 +417,6 @@ def inject_custom_css():
                 border-radius: 8px !important;
             }
 
-            /* Primary Action Buttons */
             .stButton > button {
                 background: #1E293B !important;
                 color: #F8FAFC !important;
@@ -590,6 +539,7 @@ def show_success_dialog(summary):
         {"ព័ត៌មាន": "ស្ថានភាព", "ទិន្នន័យ": summary['status']},
         {"ព័ត៌មាន": "លេខទូស័ព្ទ", "ទិន្នន័យ": summary['phone']},
         {"ព័ត៌មាន": "លក្ខខណ្ឌ", "ទិន្នន័យ": summary['condition']},
+        {"ព័ត៌មាន": "ព័ត៌មានខុសឆ្គង", "ទិន្នន័យ": summary['name_errors']},
         {"ព័ត៌មាន": "ផ្សេងៗ", "ទិន្នន័យ": summary['notes']},
         {"ព័ត៌មាន": "កាលបរិច្ឆេទ & ម៉ោង", "ទិន្នន័យ": summary['timestamp']},
     ])
@@ -650,7 +600,6 @@ def main():
 
     project_id, project_name, total_items = st.session_state["active_project"]
 
-    # Navigation Menu Items
     nav_choices = [
         "📋 បញ្ជីក្បាលដីសរុប",
         "✏️ កែប្រែទិន្នន័យក្បាលដី",
@@ -670,7 +619,7 @@ def main():
     df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
     df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
-    # Top Slate Metric Ribbon
+    # Dynamic Stat Bar Metrics
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         st.markdown(f"""<div class="slate-metric"><div class="slate-metric-title">ក្បាលដីសរុប</div><div class="slate-metric-value">{total_items}</div></div>""", unsafe_allow_html=True)
@@ -704,8 +653,10 @@ def main():
         curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
         curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
         curr_cond_str = current_row["លក្ខខណ្ឌ"] if (current_row is not None and current_row["លក្ខខណ្ឌ"] not in ["-", "ធម្មតា"]) else ""
+        curr_err_str = current_row["ព័ត៌មានខុសឆ្គង"] if (current_row is not None and current_row["ព័ត៌មានខុសឆ្គង"] not in ["-", "គ្មាន"]) else ""
 
         default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+        default_err_names = [e.strip() for e in curr_err_str.split(", ") if e.strip() in ERR_NAME_OPTIONS]
 
         with st.form("slate_update_form"):
             col1, col2 = st.columns(2)
@@ -713,10 +664,12 @@ def main():
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
                 phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
             with col2:
                 selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions)
-                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
+                # ⬇️ Multi-select box added right below the condition box
+                selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names)
 
             curr_cambodia_dt = get_cambodia_now()
             dt_col1, dt_col2 = st.columns(2)
@@ -733,10 +686,11 @@ def main():
                     selected_conditions.append("គ្មានទិន្នន័យ")
 
                 condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
+                name_err_str = ", ".join(selected_name_errors) if selected_name_errors else "គ្មាន"
                 combined_dt = datetime.datetime.combine(selected_date, selected_time)
                 formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
+                update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
 
                 st.session_state["last_saved_summary"] = {
                     "code": str(code_to_update),
@@ -744,6 +698,7 @@ def main():
                     "phone": phone_input,
                     "notes": final_notes,
                     "condition": condition_str,
+                    "name_errors": name_err_str,
                     "timestamp": formatted_dt
                 }
                 st.session_state["show_save_success_dialog"] = True
