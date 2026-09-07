@@ -36,7 +36,6 @@ def initialize_database():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
-    # User Accounts Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +53,6 @@ def initialize_database():
     if "temp_admin_expires" not in columns:
         cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
 
-    # App Settings Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
@@ -72,7 +70,6 @@ def initialize_database():
         VALUES (?, ?, 'admin', 'approved', ?)
     """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
 
-    # Projects Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +78,6 @@ def initialize_database():
         )
     """)
 
-    # Items Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,7 +92,6 @@ def initialize_database():
         )
     """)
 
-    # Logs Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,10 +184,10 @@ def register_user(username, password, requested_role):
         """, (username, password, requested_role, created_at))
         conn.commit()
         conn.close()
-        return True, "Registration submitted!"
+        return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "Username already exists. Please choose a different one."
+        return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
 
 
 def get_all_users():
@@ -202,7 +197,7 @@ def get_all_users():
     cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
     rows = cursor.fetchall()
     conn.close()
-    return pd.DataFrame(rows, columns=["ID", "Username", "Role", "Status", "Created At", "Temp Admin Expires"])
+    return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
 
 
 def update_user_status(user_id, status):
@@ -230,221 +225,6 @@ def set_temporary_admin(user_id, expiration_dt):
     conn.close()
 
 
-def revoke_admin_role(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-
-def inject_custom_css():
-    st.markdown("""
-        <style>
-            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-            
-            html, body, [class*="css"] {
-                font-family: 'Inter', system-ui, -apple-system, sans-serif;
-            }
-            
-            /* Center Alignment */
-            .stAppViewContainer, .stMarkdown, h1, h2, h3, h4, h5, h6, p, label {
-                text-align: center !important;
-            }
-            .stTextInput input, .stNumberInput input, .stTextArea textarea, .stSelectbox {
-                text-align: center !important;
-                border-radius: 8px !important;
-            }
-            
-            /* Modern Card Styling */
-            div[data-testid="stForm"] {
-                border-radius: 12px !important;
-                border: 1px solid #E5E7EB !important;
-                box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03) !important;
-                padding: 2rem !important;
-                background-color: #ffffff !important;
-            }
-            
-            /* Metric Box Styling */
-            .metric-card {
-                background: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 10px;
-                padding: 1.25rem;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-                margin-bottom: 1rem;
-            }
-            .metric-title {
-                color: #6B7280;
-                font-size: 0.875rem;
-                font-weight: 500;
-                text-transform: uppercase;
-                letter-spacing: 0.05em;
-            }
-            .metric-value {
-                color: #111827;
-                font-size: 1.875rem;
-                font-weight: 700;
-                margin-top: 0.25rem;
-            }
-            
-            /* Header Box */
-            .header-banner {
-                background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
-                color: white;
-                padding: 1.5rem;
-                border-radius: 12px;
-                margin-bottom: 1.5rem;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-            }
-            .header-banner h1 {
-                color: #FFFFFF !important;
-                font-weight: 700 !important;
-                margin: 0 !important;
-                font-size: 1.75rem !important;
-            }
-            .header-banner p {
-                color: #94A3B8 !important;
-                margin: 0.25rem 0 0 0 !important;
-                font-size: 0.9rem !important;
-            }
-            
-            /* Tables */
-            [data-testid="stDataFrame"] {
-                border-radius: 8px;
-                overflow: hidden;
-                border: 1px solid #E5E7EB;
-            }
-            [data-testid="stDataFrame"] td, [data-testid="stDataFrame"] th {
-                text-align: center !important;
-            }
-            
-            /* Buttons */
-            .stButton > button {
-                border-radius: 8px !important;
-                font-weight: 500 !important;
-                transition: all 0.2s ease-in-out !important;
-            }
-            .stButton > button:hover {
-                transform: translateY(-1px);
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
-
-def render_auth_page():
-    st.markdown("""
-        <div style="max-width: 450px; margin: 0 auto; padding-top: 2rem;">
-            <h1 style="font-size: 2rem; font-weight: 700; color: #1E293B; margin-bottom: 0.5rem;">Welcome Back</h1>
-            <p style="color: #64748B; font-size: 0.95rem; margin-bottom: 2rem;">Authentication & Access Portal</p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        mode = st.radio("Select Action", ["Log In", "Create New Account"], horizontal=True, label_visibility="collapsed")
-
-        if mode == "Log In":
-            st.write("---")
-            role_type = st.selectbox("Login Role Mode", ["Normal User", "Admin / Temp Admin"])
-
-            with st.form("login_form"):
-                username = st.text_input("Username", placeholder="Enter your username")
-                password = st.text_input("Password", type="password", placeholder="••••••••")
-                login_btn = st.form_submit_button("Sign In", use_container_width=True)
-
-                if login_btn:
-                    user = get_user_from_db(username)
-                    if user and user[2] == password:
-                        db_role = user[3]
-                        db_status = user[4]
-
-                        if db_status == "inactive":
-                            st.error("🔒 Account INACTIVE. Contact root admin.")
-                            return
-
-                        if db_status == "pending":
-                            st.session_state["pending_user"] = username
-                            st.session_state["authenticated"] = False
-                            st.rerun()
-                        elif db_status == "rejected":
-                            st.error("Account registration request was rejected.")
-                        elif db_status == "approved":
-                            if role_type == "Admin / Temp Admin" and db_role not in ["admin", "temp_admin"]:
-                                st.error("Account lacks Admin permissions.")
-                                return
-
-                            st.session_state["authenticated"] = True
-                            st.session_state["username"] = username
-                            st.session_state["role"] = db_role
-                            st.session_state["show_startup_popup"] = True
-                            st.session_state.pop("pending_user", None)
-                            st.success("Login successful!")
-                            st.rerun()
-                    else:
-                        st.error("Invalid credentials.")
-
-        elif mode == "Create New Account":
-            st.write("---")
-            requested_role = st.selectbox("Select Desired Role", ["user", "admin"])
-
-            with st.form("register_form"):
-                new_user = st.text_input("Username", placeholder="Choose a username")
-                new_pass = st.text_input("Password", type="password", placeholder="••••••••")
-                confirm_pass = st.text_input("Confirm Password", type="password", placeholder="••••••••")
-                reg_btn = st.form_submit_button("Request Account", use_container_width=True)
-
-                if reg_btn:
-                    if not new_user or not new_pass:
-                        st.error("Please fill in all fields.")
-                    elif new_pass != confirm_pass:
-                        st.error("Passwords do not match!")
-                    else:
-                        success, msg = register_user(new_user, new_pass, requested_role)
-                        if success:
-                            st.session_state["pending_user"] = new_user
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-
-def render_pending_waiting_screen(username):
-    user = get_user_from_db(username)
-    if not user:
-        st.error("Account not found.")
-        if st.button("Back to Login"):
-            st.session_state.pop("pending_user", None)
-            st.rerun()
-        return
-
-    status = user[4]
-
-    st.markdown("<div style='height: 50px;'></div>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-
-    with c2:
-        if status == "pending":
-            st.info(f"⏳ **Account Approval Pending**\n\nHello **{username}**, your account request is pending admin review.")
-            time.sleep(3)
-            st.rerun()
-
-        elif status == "approved":
-            st.success(f"🎉 **Account Approved!**\n\nWelcome **{username}**!")
-            if st.button("Continue to Dashboard", use_container_width=True):
-                st.session_state["authenticated"] = True
-                st.session_state["username"] = username
-                st.session_state["role"] = user[3]
-                st.session_state["show_startup_popup"] = True
-                st.session_state.pop("pending_user", None)
-                st.rerun()
-
-        elif status == "rejected":
-            st.error(f"❌ **Request Rejected**\n\nSorry **{username}**, your registration request was declined.")
-            if st.button("Return to Login", use_container_width=True):
-                st.session_state.pop("pending_user", None)
-                st.rerun()
-
-
 def get_all_projects():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -461,8 +241,8 @@ def create_new_project(name, total_items):
         cursor.execute("INSERT INTO projects (name, total_items) VALUES (?, ?)", (name, total_items))
         conn.commit()
         project_id = cursor.lastrowid
-        log_activity(project_id, None, "Project Created",
-                     notes=f"Created project '{name}' with ក្បាលដីសរុប {total_items}")
+        log_activity(project_id, None, "បានបង្កើតគម្រោង",
+                     notes=f"បានបង្កើតគម្រោង '{name}' ដែលមានក្បាលដីសរុប {total_items}")
     except sqlite3.IntegrityError:
         cursor.execute("SELECT id, name, total_items FROM projects WHERE name = ?", (name,))
         row = cursor.fetchone()
@@ -479,10 +259,10 @@ def update_project_details(project_id, new_name, new_total_items):
                        (new_name, new_total_items, project_id))
         conn.commit()
         conn.close()
-        return True, "Project updated successfully!"
+        return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "Project name already exists."
+        return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
 def delete_project(project_id):
@@ -557,17 +337,17 @@ def get_project_items(project_id, total_items):
 
         data.append({
             "ក្បាលដី": code,
-            "Status": status,
+            "ស្ថានភាព": status,
             "លេខទូស័ព្ទ": phone,
             "ផ្សេងៗ": notes,
-            "Condition": condition if condition else "ធម្មតា",
-            "Last Updated": updated_at if updated_at else "-"
+            "លក្ខខណ្ឌ": condition if condition else "ធម្មតា",
+            "បច្ចុប្បន្នភាពចុងក្រោយ": updated_at if updated_at else "-"
         })
     return pd.DataFrame(data)
 
 
 def is_no_data(row):
-    cond = str(row["Condition"])
+    cond = str(row["លក្ខខណ្ឌ"])
     notes = str(row["ផ្សេងៗ"])
     return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
 
@@ -595,7 +375,7 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, custom_
     log_activity(
         project_id=project_id,
         code=code,
-        action_type="Item Updated",
+        action_type="កែប្រែទិន្នន័យ",
         status=status,
         phone=phone,
         notes=notes,
@@ -625,96 +405,230 @@ def get_project_history(project_id):
             log_status = "បានពិនិត្យ"
 
         data.append({
-            "Date & Time": log[0] if log[0] else "",
+            "កាលបរិច្ឆេទ & ម៉ោង": log[0] if log[0] else "",
             "ក្បាលដី": log[1] if log[1] else "",
-            "Action": log[2] if log[2] else "",
-            "Status": log_status if log_status else "",
+            "សកម្មភាព": log[2] if log[2] else "",
+            "ស្ថានភាព": log_status if log_status else "",
             "លេខទូស័ព្ទ": log[4] if log[4] else "",
             "ផ្សេងៗ": log[5] if log[5] else "",
-            "Condition": log[6] if log[6] else "ធម្មតា"
+            "លក្ខខណ្ឌ": log[6] if log[6] else "ធម្មតា"
         })
     return pd.DataFrame(data)
 
 
-def render_project_selector(key_prefix="modal"):
-    projects = get_all_projects()
-    mode = st.radio("Select Option", ["Select Existing Project", "Create New Project"], key=f"{key_prefix}_mode", horizontal=True)
+def inject_custom_css():
+    st.markdown("""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Inter:wght@300;400;600;700&display=swap');
+            
+            /* Global Dark Glassmorphic Theme */
+            html, body, [class*="css"] {
+                font-family: 'Kantumruy Pro', 'Inter', sans-serif !important;
+                background-color: #0B0F17 !important;
+                color: #E2E8F0 !important;
+            }
+            
+            .stApp {
+                background: radial-gradient(circle at 20% 20%, #111827 0%, #0B0F17 100%) !important;
+            }
+            
+            /* Sidebar Custom Styling */
+            section[data-testid="stSidebar"] {
+                background-color: #0F172A !important;
+                border-right: 1px solid #1E293B !important;
+            }
+            
+            /* KPI Glass Cards */
+            .kpi-card {
+                background: rgba(30, 41, 59, 0.7);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                backdrop-filter: blur(12px);
+                border-radius: 12px;
+                padding: 1rem 1.25rem;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+            }
+            .kpi-title {
+                color: #94A3B8;
+                font-size: 0.825rem;
+                font-weight: 500;
+            }
+            .kpi-val {
+                color: #38BDF8;
+                font-size: 1.75rem;
+                font-weight: 700;
+                margin-top: 0.2rem;
+            }
 
-    if mode == "Select Existing Project":
-        if projects:
-            project_options = {f"{p[1]} (ក្បាលដីសរុប: {p[2]})": p for p in projects}
-            selected_label = st.selectbox("Choose Project", list(project_options.keys()), key=f"{key_prefix}_select")
-            if st.button("Load Selected Project", use_container_width=True, key=f"{key_prefix}_btn_load"):
-                p_id, p_name, p_items = project_options[selected_label]
-                st.session_state["active_project"] = (p_id, p_name, p_items)
-                st.session_state["show_startup_popup"] = False
-                st.session_state["msg"] = ("success", f"Successfully loaded project '{p_name}'!")
-                st.session_state["active_tab"] = "Full Inventory"
-                st.session_state["nav_expanded"] = False
-                st.rerun()
+            /* Header Neon Styling */
+            .neon-header {
+                background: linear-gradient(90deg, #1E293B 0%, #0F172A 100%);
+                border: 1px solid #334155;
+                padding: 1.25rem;
+                border-radius: 12px;
+                margin-bottom: 1.5rem;
+            }
+            .neon-header h1 {
+                color: #F8FAFC !important;
+                font-size: 1.5rem !important;
+                margin: 0 !important;
+            }
+            .neon-header p {
+                color: #38BDF8 !important;
+                font-size: 0.875rem !important;
+                margin: 0.25rem 0 0 0 !important;
+            }
+
+            /* Custom Inputs & Selectboxes */
+            .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+                background-color: #1E293B !important;
+                color: #F8FAFC !important;
+                border: 1px solid #334155 !important;
+                border-radius: 8px !important;
+            }
+            
+            /* Dataframes Dark Palette */
+            [data-testid="stDataFrame"] {
+                background-color: #1E293B;
+                border: 1px solid #334155;
+                border-radius: 10px;
+            }
+
+            /* Custom Button Overrides */
+            .stButton > button {
+                background: #1E293B !important;
+                color: #E2E8F0 !important;
+                border: 1px solid #334155 !important;
+                border-radius: 8px !important;
+                transition: all 0.2s ease;
+            }
+            .stButton > button:hover {
+                border-color: #38BDF8 !important;
+                color: #38BDF8 !important;
+                box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+
+def render_auth_page():
+    st.markdown("""
+        <div style="text-align: center; max-width: 420px; margin: 3rem auto 1rem auto;">
+            <h1 style="font-size: 1.8rem; font-weight: 700; color: #F8FAFC;">ប្រព័ន្ធគ្រប់គ្រងបិតផ្សាយ</h1>
+            <p style="color: #94A3B8; font-size: 0.9rem;">សូមចូលប្រើប្រាស់ដើម្បីបន្ត</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        mode = st.radio("ជ្រើសរើស", ["ចូលប្រើប្រាស់", "បង្កើតគណនីថ្មី"], horizontal=True, label_visibility="collapsed")
+
+        if mode == "ចូលប្រើប្រាស់":
+            role_type = st.selectbox("ប្រភេទទិន្នន័យចូល", ["អ្នកប្រើប្រាស់ធម្មតា (User)", "អែដមីន (Admin)"])
+            with st.form("login_form"):
+                username = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                password = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                login_btn = st.form_submit_button("ចូលប្រព័ន្ធ", use_container_width=True)
+
+                if login_btn:
+                    user = get_user_from_db(username)
+                    if user and user[2] == password:
+                        db_role = user[3]
+                        db_status = user[4]
+
+                        if db_status == "inactive":
+                            st.error("🔒 គណនីនេះត្រូវផ្អាក។ សូមទាក់ទង Admin។")
+                            return
+
+                        if db_status == "pending":
+                            st.session_state["pending_user"] = username
+                            st.session_state["authenticated"] = False
+                            st.rerun()
+                        elif db_status == "approved":
+                            if role_type == "អែដមីន (Admin)" and db_role not in ["admin", "temp_admin"]:
+                                st.error("គណនីនេះគ្មានសិទ្ធិជា Admin ទេ។")
+                                return
+
+                            st.session_state["authenticated"] = True
+                            st.session_state["username"] = username
+                            st.session_state["role"] = db_role
+                            st.session_state["show_startup_popup"] = True
+                            st.session_state.pop("pending_user", None)
+                            st.rerun()
+                    else:
+                        st.error("ឈ្មោះអ្នកប្រើប្រាស់ ឬពាក្យសម្ងាត់មិនត្រឹមត្រូវ។")
+
         else:
-            st.warning("No existing projects found. Please create one below.")
+            requested_role = st.selectbox("ស្នើសុំនាទី", ["user", "admin"])
+            with st.form("register_form"):
+                new_user = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                new_pass = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                confirm_pass = st.text_input("បញ្ជាក់ពាក្យសម្ងាត់", type="password", placeholder="Confirm Password")
+                reg_btn = st.form_submit_button("ស្នើសុំគណនី", use_container_width=True)
 
-    if mode == "Create New Project" or not projects:
-        new_name = st.text_input("Project Name", value="Default Project", key=f"{key_prefix}_name")
-        total_items_input = st.number_input("ក្បាលដីសរុប", min_value=1, value=100, key=f"{key_prefix}_items")
+                if reg_btn:
+                    if not new_user or not new_pass:
+                        st.error("សូមបំពេញព័ត៌មានឱ្យគ្រប់។")
+                    elif new_pass != confirm_pass:
+                        st.error("ពាក្យសម្ងាត់ទាំងពីរមិនត្រូវគ្នាទេ!")
+                    else:
+                        success, msg = register_user(new_user, new_pass, requested_role)
+                        if success:
+                            st.session_state["pending_user"] = new_user
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
-        if st.button("Save & Open Project", use_container_width=True, key=f"{key_prefix}_btn_create"):
-            p_id, p_name, p_items = create_new_project(new_name, int(total_items_input))
-            st.session_state["active_project"] = (p_id, p_name, p_items)
-            st.session_state["show_startup_popup"] = False
-            st.session_state["msg"] = ("success", f"Successfully created/loaded project '{p_name}'!")
-            st.session_state["active_tab"] = "Full Inventory"
-            st.session_state["nav_expanded"] = False
+
+def render_pending_waiting_screen(username):
+    user = get_user_from_db(username)
+    if not user:
+        st.error("រកមិនឃើញគណនី។")
+        return
+
+    status = user[4]
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if status == "pending":
+            st.info(f"⏳ **រង់ចាំការអនុម័ត**\n\nសួស្តី **{username}**! គណនីរបស់អ្នកកំពុងរង់ចាំ Admin ពិនិត្យ។")
+            time.sleep(3)
             st.rerun()
+        elif status == "approved":
+            st.success(f"🎉 **បានអនុម័តជោគជ័យ!**\n\nស្វាគមន៍ **{username}**!")
+            if st.button("ចូលទៅកាន់ Dashboard", use_container_width=True):
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.session_state["role"] = user[3]
+                st.session_state["show_startup_popup"] = True
+                st.session_state.pop("pending_user", None)
+                st.rerun()
 
 
 @st.dialog(" ")
 def show_success_dialog(summary):
-    st.markdown("""
-        <div style="text-align: center; padding: 5px 0;">
-            <div style="background-color: #DEF7EC; width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px auto;">
-                <span style="color: #0E9F6E; font-size: 24px;">✓</span>
-            </div>
-            <h3 style="margin: 0; color: #111827; font-size: 20px; font-weight: 600;">Saved Successfully</h3>
-            <p style="color: #6B7280; font-size: 13px; margin-top: 4px; margin-bottom: 15px;">Item details updated in project database.</p>
+    st.markdown(f"""
+        <div style="text-align: center;">
+            <h3 style="color: #4ADE80; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
+            <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
         </div>
     """, unsafe_allow_html=True)
 
     summary_df = pd.DataFrame([
-        {"Detail Field": "ក្បាលដី (Code)", "Saved Value": summary['code']},
-        {"Detail Field": "Status", "Saved Value": summary['status']},
-        {"Detail Field": "លេខទូស័ព្ទ (Phone)", "Saved Value": summary['phone']},
-        {"Detail Field": "Condition", "Saved Value": summary['condition']},
-        {"Detail Field": "ផ្សេងៗ (Notes)", "Saved Value": summary['notes']},
-        {"Detail Field": "Date & Time", "Saved Value": summary['timestamp']},
+        {"ព័ត៌មាន": "ក្បាលដី", "ទិន្នន័យ": summary['code']},
+        {"ព័ត៌មាន": "ស្ថានភាព", "ទិន្នន័យ": summary['status']},
+        {"ព័ត៌មាន": "លេខទូស័ព្ទ", "ទិន្នន័យ": summary['phone']},
+        {"ព័ត៌មាន": "លក្ខខណ្ឌ", "ទិន្នន័យ": summary['condition']},
+        {"ព័ត៌មាន": "ផ្សេងៗ", "ទិន្នន័យ": summary['notes']},
+        {"ព័ត៌មាន": "កាលបរិច្ឆេទ & ម៉ោង", "ទិន្នន័យ": summary['timestamp']},
     ])
 
     st.table(summary_df)
-
-    if st.button("Close Window", use_container_width=True):
+    if st.button("បិទផ្ទាំង", use_container_width=True):
         st.session_state.pop("show_save_success_dialog", None)
         st.rerun()
 
 
-if hasattr(st, "dialog"):
-    @st.dialog("🚀 Select or Create Project")
-    def startup_project_modal():
-        render_project_selector(key_prefix="popup")
-else:
-    def startup_project_modal():
-        st.subheader("🚀 Select or Create Project")
-        render_project_selector(key_prefix="popup")
-
-
-def switch_tab(tab_name):
-    st.session_state["active_tab"] = tab_name
-    st.session_state["nav_expanded"] = False
-    st.rerun()
-
-
 def main():
-    st.set_page_config(page_title="Project Manager", layout="wide")
+    st.set_page_config(page_title="GIS Project Manager", layout="wide", initial_sidebar_state="expanded")
     inject_custom_css()
     initialize_database()
 
@@ -726,338 +640,220 @@ def main():
         render_auth_page()
         return
 
-    if "nav_expanded" not in st.session_state:
-        st.session_state["nav_expanded"] = False
-
-    if st.session_state.get("show_startup_popup", True) or "active_project" not in st.session_state:
-        startup_project_modal()
-        if "active_project" not in st.session_state:
-            return
-
-    if st.session_state.get("show_save_success_dialog", False):
-        show_success_dialog(st.session_state.get("last_saved_summary", {}))
-
     current_username = st.session_state.get("username", "Guest")
     user_data = get_user_from_db(current_username)
 
     if not user_data or user_data[4] == "inactive":
-        st.error("Account deactivated or removed.")
+        st.error("គណនីត្រូវបញ្ឈប់។")
         st.session_state["authenticated"] = False
         st.rerun()
 
     current_role = user_data[3]
     st.session_state["role"] = current_role
     is_admin = current_role in ["admin", "temp_admin"]
+
+    projects = get_all_projects()
+
+    # --- SIDEBAR NAVIGATION ---
+    with st.sidebar:
+        st.markdown("<h2 style='color: #F8FAFC; font-size: 1.2rem; margin-bottom: 0.2rem;'>📁 ជ្រើសរើសគម្រោង</h2>", unsafe_allow_html=True)
+
+        if projects:
+            proj_dict = {f"{p[1]} (សរុប: {p[2]})": p for p in projects}
+            selected_proj_label = st.selectbox("គម្រោងសកម្ម", list(proj_dict.keys()), label_visibility="collapsed")
+            active_p = proj_dict[selected_proj_label]
+            st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
+        else:
+            st.warning("មិនទាន់មានគម្រោងទេ។ សូមបង្កើតថ្មី។")
+
+        st.write("---")
+        st.markdown("<h3 style='color: #94A3B8; font-size: 0.9rem;'>ម៉ឺនុយបញ្ជា</h3>", unsafe_allow_html=True)
+
+        nav_choice = st.radio(
+            "Navigation",
+            options=[
+                "📋 បញ្ជីក្បាលដីសរុប",
+                "✏️ កែប្រែទិន្នន័យក្បាលដី",
+                "⏳ មិនទាន់បានពិនិត្យ",
+                "✅ បានពិនិត្យ",
+                "🚫 គ្មានទិន្នន័យ",
+                "📊 សរុបលក្ខខណ្ឌ",
+                "📜 ប្រវត្តិនៃការកែប្រែ (Logs)",
+                "⚙️ កែប្រែគម្រោង"
+            ] + (["👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)"] if is_admin else []),
+            label_visibility="collapsed"
+        )
+
+        st.write("---")
+        st.caption(f"អ្នកប្រើប្រាស់: **{current_username}**")
+        if st.button("🚪 ចាកចេញ", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.session_state.pop("active_project", None)
+            st.rerun()
+
+    if "active_project" not in st.session_state:
+        st.info("សូមជ្រើសរើស ឬបង្កើតគម្រោងដើម្បីបន្ត។")
+        return
+
+    project_id, project_name, total_items = st.session_state["active_project"]
     app_title = get_app_title()
 
-    # Modern Header Banner
+    # Top Banner Header
     st.markdown(f"""
-        <div class="header-banner">
+        <div class="neon-header">
             <h1>{app_title}</h1>
-            <p>Logged in as: <b>{current_username}</b> ({current_role.upper().replace('_', ' ')})</p>
+            <p>គម្រោងសកម្ម: <b>{project_name}</b> (ក្បាលដីសរុប: {total_items})</p>
         </div>
     """, unsafe_allow_html=True)
 
-    logout_col1, logout_col2 = st.columns([8, 2])
-    with logout_col2:
-        if st.button("🚪 Log Out", use_container_width=True):
-            st.session_state["authenticated"] = False
-            st.session_state["show_startup_popup"] = True
-            st.session_state.pop("active_project", None)
-            st.session_state.pop("username", None)
-            st.session_state.pop("role", None)
-            st.rerun()
+    df_items = get_project_items(project_id, total_items)
+    df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
+    df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
-    project_id, project_name, total_items = st.session_state["active_project"]
-
-    if "msg" in st.session_state:
-        msg_type, msg_text = st.session_state["msg"]
-        if msg_type == "success":
-            st.success(msg_text)
-        elif msg_type == "info":
-            st.info(msg_text)
-        elif msg_type == "warning":
-            st.warning(msg_text)
-        del st.session_state["msg"]
-
-    st.subheader(f"Active Project: {project_name}")
-    st.caption(f"Total Land Plots (ក្បាលដីសរុប): {total_items}")
-
-    if "active_tab" not in st.session_state:
-        st.session_state["active_tab"] = "Full Inventory"
-
-    # Sleek Pill-Style Navigation Bar
-    st.write("---")
-    nav_cols = st.columns(5 if is_admin else 4)
-    with nav_cols[0]:
-        if st.button("📋 Inventory", use_container_width=True): switch_tab("Full Inventory")
-        if st.button("✏️ Edit Item", use_container_width=True): switch_tab("Update Item")
-    with nav_cols[1]:
-        if st.button("⏳ Unchecked", use_container_width=True): switch_tab("Not Yet Checked")
-        if st.button("✅ Checked", use_container_width=True): switch_tab("Checked Items")
-    with nav_cols[2]:
-        if st.button("🚫 No Data", use_container_width=True): switch_tab("No Data Items")
-        if st.button("📊 Conditions", use_container_width=True): switch_tab("Condition Summary")
-    with nav_cols[3]:
-        if st.button("📜 Logs", use_container_width=True): switch_tab("History Log")
-        if st.button("⚙️ Settings", use_container_width=True): switch_tab("Project Settings")
-    if is_admin:
-        with nav_cols[4]:
-            if st.button("👥 Admin Control", use_container_width=True): switch_tab("Admin Control")
+    # Dynamic Stat Bar Metrics
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">ក្បាលដីសរុប</div><div class="kpi-val">{total_items}</div></div>""", unsafe_allow_html=True)
+    with m2:
+        checked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"])
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">បានពិនិត្យ</div><div class="kpi-val" style="color: #4ADE80;">{checked_count}</div></div>""", unsafe_allow_html=True)
+    with m3:
+        unchecked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"])
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">មិនទាន់បានពិនិត្យ</div><div class="kpi-val" style="color: #FACC15;">{unchecked_count}</div></div>""", unsafe_allow_html=True)
+    with m4:
+        nodata_count = len(df_no_data_items)
+        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">គ្មានទិន្នន័យ</div><div class="kpi-val" style="color: #F87171;">{nodata_count}</div></div>""", unsafe_allow_html=True)
 
     st.write("---")
-    active_tab = st.session_state["active_tab"]
 
-    if active_tab == "Admin Control" and is_admin:
-        st.markdown("### 👥 Admin Control & User Management")
+    if st.session_state.get("show_save_success_dialog", False):
+        show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
-        with st.form("admin_title_form"):
-            st.markdown("#### App Title Settings")
-            new_title_input = st.text_input("Application Title", value=app_title)
-            save_title_btn = st.form_submit_button("Update App Title", use_container_width=True)
-            if save_title_btn and new_title_input.strip():
-                set_app_title(new_title_input.strip())
-                st.session_state["msg"] = ("success", "App title updated successfully!")
-                st.rerun()
+    # Dynamic Screen Content rendering
+    if nav_choice == "📋 បញ្ជីក្បាលដីសរុប":
+        st.subheader("📋 បញ្ជីក្បាលដីសរុប")
+        st.dataframe(df_valid_items, use_container_width=True)
 
-        st.write("---")
-        df_users = get_all_users()
-        st.dataframe(df_users, use_container_width=True)
+    elif nav_choice == "✏️ កែប្រែទិន្នន័យក្បាលដី":
+        st.subheader("✏️ កែប្រែទិន្នន័យក្បាលដី")
 
-        target_user = st.selectbox("Select User Account to Modify", options=df_users["Username"].tolist())
-        target_row = df_users[df_users["Username"] == target_user].iloc[0]
-        t_id, t_role, t_status = target_row["ID"], target_row["Role"], target_row["Status"]
+        c_search, c_space = st.columns([2, 2])
+        with c_search:
+            code_to_update = st.number_input("បញ្ចូលលេខក្បាលដី", min_value=1, max_value=total_items, step=1)
 
-        if target_user == DEFAULT_ADMIN_USER:
-            st.info(f"🛡️ **{DEFAULT_ADMIN_USER}** is protected and cannot be edited.")
-        else:
-            action_c1, action_c2, action_c3 = st.columns(3)
-            with action_c1:
-                if t_status == "approved":
-                    if st.button("Set INACTIVE", use_container_width=True):
-                        update_user_status(t_id, "inactive")
-                        st.session_state["msg"] = ("warning", f"User {target_user} is now INACTIVE.")
-                        st.rerun()
-                else:
-                    if st.button("Approve User", use_container_width=True):
-                        update_user_status(t_id, "approved")
-                        st.session_state["msg"] = ("success", f"User {target_user} activated.")
-                        st.rerun()
+        current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+        curr_status = current_row["ស្ថានភាព"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+        curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+        curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+        curr_cond_str = current_row["លក្ខខណ្ឌ"] if (current_row is not None and current_row["លក្ខខណ្ឌ"] not in ["-", "ធម្មតា"]) else ""
 
-            with action_c2:
-                hours = st.number_input("Admin Duration (Hours)", min_value=1, max_value=720, value=2)
-                if st.button("Grant Temp Admin", use_container_width=True):
-                    exp_dt = get_cambodia_now() + datetime.timedelta(hours=int(hours))
-                    set_temporary_admin(t_id, exp_dt)
-                    st.session_state["msg"] = ("success", f"Temp Admin given to {target_user}")
-                    st.rerun()
+        default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
-            with action_c3:
-                if st.button(f"🚨 Delete Account", use_container_width=True):
-                    delete_user_account(t_id)
-                    st.session_state["msg"] = ("warning", f"Account '{target_user}' deleted.")
-                    st.rerun()
-
-    elif active_tab == "Project Settings":
-        st.markdown("### ⚙️ Project Settings")
-        if is_admin:
-            with st.form("edit_project_form"):
-                edit_name = st.text_input("Project Name", value=project_name)
-                edit_total = st.number_input("Total Items (ក្បាលដីសរុប)", min_value=1, value=total_items)
-                update_proj_btn = st.form_submit_button("Update Project Details", use_container_width=True)
-
-                if update_proj_btn:
-                    success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
-                    if success:
-                        st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
-                        st.session_state["msg"] = ("success", "Project updated!")
-                        st.rerun()
-                    else:
-                        st.error(msg)
-
-            if st.button("🚨 Delete Project Completely", use_container_width=True):
-                delete_project(project_id)
-                st.session_state.pop("active_project", None)
-                st.session_state["show_startup_popup"] = True
-                st.session_state["msg"] = ("warning", f"Project '{project_name}' deleted.")
-                st.rerun()
-
-        st.write("---")
-        render_project_selector(key_prefix="tab")
-
-    else:
-        df_items = get_project_items(project_id, total_items)
-        df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
-        df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
-
-        if active_tab == "Full Inventory":
-            st.markdown("### Complete Inventory List")
-            st.dataframe(df_valid_items, use_container_width=True)
-
-            if is_admin:
-                st.write("---")
-                inv_col1, inv_col2 = st.columns(2)
-                with inv_col1:
-                    add_qty = st.number_input("Add items count", min_value=1, value=1, step=1)
-                    if st.button(f"Add {add_qty} Item(s)", use_container_width=True):
-                        new_total = total_items + int(add_qty)
-                        update_project_details(project_id, project_name, new_total)
-                        st.session_state["active_project"] = (project_id, project_name, new_total)
-                        st.session_state["msg"] = ("success", f"Added {add_qty} item(s).")
-                        st.rerun()
-
-                with inv_col2:
-                    del_code = st.number_input("Delete Plot #", min_value=1, max_value=total_items, step=1)
-                    if st.button(f"Delete Item #{del_code}", use_container_width=True):
-                        delete_item_by_code(project_id, int(del_code))
-                        st.session_state["msg"] = ("success", f"Item #{del_code} deleted.")
-                        st.rerun()
-
-        elif active_tab == "Update Item":
-            st.markdown("### Update Item Details")
-
-            search_col, load_btn_col = st.columns([3, 1])
-            with search_col:
-                code_to_update = st.number_input("ក្បាលដី", min_value=1, max_value=total_items, step=1)
-            with load_btn_col:
-                st.write("&#160;")
-                if st.button("🔄 Refresh", use_container_width=True): st.rerun()
-
-            current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
-            curr_status = current_row["Status"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
-            curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
-            curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
-
-            curr_cond_str = current_row["Condition"] if (current_row is not None and current_row["Condition"] not in ["-", "ធម្មតា"]) else ""
-            default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
-
-            if st.session_state.get("clear_form_trigger", False):
-                curr_status, curr_phone, curr_notes, default_conditions = "មិនទាន់បានពិនិត្យ", "", "", []
-                st.session_state["clear_form_trigger"] = False
-
-            with st.form("update_form"):
+        with st.form("update_item_glass_form"):
+            col1, col2 = st.columns(2)
+            with col1:
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
                 no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
-
                 phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+
+            with col2:
+                selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions)
                 notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
-                selected_conditions = st.multiselect("Condition", options=CONDITION_OPTIONS, default=default_conditions)
+            curr_cambodia_dt = get_cambodia_now()
+            dt_col1, dt_col2 = st.columns(2)
+            with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
+            with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
-                current_cambodia_dt = get_cambodia_now()
-                date_col, time_col = st.columns(2)
-                with date_col: selected_date = st.date_input("Update Date", value=current_cambodia_dt.date())
-                with time_col: selected_time = st.time_input("Update Time", value=current_cambodia_dt.time())
+            save_btn = st.form_submit_button("រក្សាទុកទិន្នន័យ", use_container_width=True)
 
-                btn_c1, btn_c2 = st.columns(2)
-                with btn_c1: submitted = st.form_submit_button("Save Changes", use_container_width=True)
-                with btn_c2: clear_form_btn = st.form_submit_button("🧹 Clear Form", use_container_width=True)
+            if save_btn:
+                new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+                final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
 
-                if clear_form_btn:
-                    st.session_state["clear_form_trigger"] = True
-                    st.rerun()
+                if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
+                    selected_conditions.append("គ្មានទិន្នន័យ")
 
-                if submitted:
-                    new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
-                    final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+                condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
+                combined_dt = datetime.datetime.combine(selected_date, selected_time)
+                formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                    if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
-                        selected_conditions.append("គ្មានទិន្នន័យ")
+                update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
 
-                    condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
-                    combined_dt = datetime.datetime.combine(selected_date, selected_time)
-                    formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
-
-                    update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, formatted_dt)
-
-                    st.session_state["last_saved_summary"] = {
-                        "code": str(code_to_update),
-                        "status": new_status,
-                        "phone": phone_input,
-                        "notes": final_notes,
-                        "condition": condition_str,
-                        "timestamp": formatted_dt
-                    }
-                    st.session_state["show_save_success_dialog"] = True
-                    st.rerun()
-
-            if is_admin:
-                if st.button(f"Reset Item #{code_to_update} to Default", use_container_width=True):
-                    reset_single_item_data(project_id, code_to_update)
-                    st.session_state["msg"] = ("success", f"Item #{code_to_update} cleared.")
-                    st.rerun()
-
-        elif active_tab == "Not Yet Checked":
-            not_checked_df = df_valid_items[df_valid_items["Status"] == "មិនទាន់បានពិនិត្យ"]
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">Remaining Unchecked Items</div>
-                    <div class="metric-value">{len(not_checked_df)}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            st.dataframe(not_checked_df, use_container_width=True)
-
-        elif active_tab == "Checked Items":
-            checked_df = df_valid_items[df_valid_items["Status"] == "បានពិនិត្យ"]
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">Total Checked Items</div>
-                    <div class="metric-value">{len(checked_df)}</div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            search_code = st.number_input("Search Plot #", min_value=0, max_value=total_items, value=0)
-            if search_code > 0:
-                st.dataframe(checked_df[checked_df["ក្បាលដី"] == search_code], use_container_width=True)
-            else:
-                st.dataframe(checked_df, use_container_width=True)
-
-        elif active_tab == "No Data Items":
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">No Data Plots</div>
-                    <div class="metric-value">{len(df_no_data_items)}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            st.dataframe(df_no_data_items, use_container_width=True)
-
-        elif active_tab == "Condition Summary":
-            st.markdown("### 📊 Condition Summary")
-            summary_data = []
-            for option in CONDITION_OPTIONS:
-                matching_codes = []
-                for _, row in df_items.iterrows():
-                    item_cond = row["Condition"]
-                    if item_cond and item_cond not in ["-", "ធម្មតា"]:
-                        cond_list = [c.strip() for c in item_cond.split(",")]
-                        if option in cond_list:
-                            matching_codes.append(str(row["ក្បាលដី"]))
-
-                summary_data.append({
-                    "Condition Category": option,
-                    "Total Count": len(matching_codes),
-                    "ក្បាលដី Codes": ", ".join(matching_codes) if matching_codes else ""
-                })
-
-            st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
-
-            if is_admin and st.button("Clear Conditions", use_container_width=True):
-                clear_conditions_data(project_id)
-                st.session_state["msg"] = ("success", "Condition data cleared!")
+                st.session_state["last_saved_summary"] = {
+                    "code": str(code_to_update),
+                    "status": new_status,
+                    "phone": phone_input,
+                    "notes": final_notes,
+                    "condition": condition_str,
+                    "timestamp": formatted_dt
+                }
+                st.session_state["show_save_success_dialog"] = True
                 st.rerun()
 
-        elif active_tab == "History Log":
-            st.markdown("### 📜 Activity History Log")
-            df_history = get_project_history(project_id)
-            if not df_history.empty:
-                st.dataframe(df_history, use_container_width=True)
-            else:
-                st.info("No activity logged for this project yet.")
+    elif nav_choice == "⏳ មិនទាន់បានពិនិត្យ":
+        st.subheader("⏳ បញ្ជីក្បាលដីមិនទាន់បានពិនិត្យ")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"], use_container_width=True)
 
-            if is_admin and st.button("Clear History Log", use_container_width=True):
-                clear_history_logs(project_id)
-                st.session_state["msg"] = ("success", "History log cleared!")
+    elif nav_choice == "✅ បានពិនិត្យ":
+        st.subheader("✅ បញ្ជីក្បាលដីបានពិនិត្យរួចរាល់")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"], use_container_width=True)
+
+    elif nav_choice == "🚫 គ្មានទិន្នន័យ":
+        st.subheader("🚫 បញ្ជីក្បាលដីគ្មានទិន្នន័យ")
+        st.dataframe(df_no_data_items, use_container_width=True)
+
+    elif nav_choice == "📊 សរុបលក្ខខណ្ឌ":
+        st.subheader("📊 សរុបតាមលក្ខខណ្ឌ")
+        summary_data = []
+        for option in CONDITION_OPTIONS:
+            matching_codes = []
+            for _, row in df_items.iterrows():
+                item_cond = row["លក្ខខណ្ឌ"]
+                if item_cond and item_cond not in ["-", "ធម្មតា"]:
+                    cond_list = [c.strip() for c in item_cond.split(",")]
+                    if option in cond_list:
+                        matching_codes.append(str(row["ក្បាលដី"]))
+
+            summary_data.append({
+                "ប្រភេទលក្ខខណ្ឌ": option,
+                "ចំនួនសរុប": len(matching_codes),
+                "បញ្ជីលេខក្បាលដី": ", ".join(matching_codes) if matching_codes else ""
+            })
+
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+
+    elif nav_choice == "📜 ប្រវត្តិនៃការកែប្រែ (Logs)":
+        st.subheader("📜 ប្រវត្តិនៃការកែប្រែ (Logs)")
+        st.dataframe(get_project_history(project_id), use_container_width=True)
+
+    elif nav_choice == "⚙️ កែប្រែគម្រោង":
+        st.subheader("⚙️ ការកំណត់ និងបង្កើតគម្រោង")
+
+        with st.form("new_project_form"):
+            st.markdown("#### បង្កើតគម្រោងថ្មី")
+            p_name_inp = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងថ្មី")
+            p_items_inp = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
+            create_p_btn = st.form_submit_button("បង្កើតគម្រោង", use_container_width=True)
+
+            if create_p_btn:
+                pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
+                st.session_state["active_project"] = (pid, pname, pitems)
+                st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
                 st.rerun()
+
+    elif nav_choice == "👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)" and is_admin:
+        st.subheader("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin Control)")
+
+        with st.form("app_title_form"):
+            new_title_val = st.text_input("ចំណងជើងកម្មវិធី (App Title)", value=app_title)
+            if st.form_submit_button("រក្សាទុកចំណងជើង", use_container_width=True):
+                set_app_title(new_title_val.strip())
+                st.rerun()
+
+        st.write("---")
+        df_u = get_all_users()
+        st.dataframe(df_u, use_container_width=True)
 
 
 if __name__ == "__main__":
