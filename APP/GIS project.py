@@ -419,92 +419,65 @@ def get_project_history(project_id):
 def inject_custom_css():
     st.markdown("""
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Inter:wght@300;400;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
             
-            /* Global Dark Glassmorphic Theme */
+            /* Slate Deep Theme */
             html, body, [class*="css"] {
-                font-family: 'Kantumruy Pro', 'Inter', sans-serif !important;
-                background-color: #0B0F17 !important;
-                color: #E2E8F0 !important;
+                font-family: 'Kantumruy Pro', 'Space Grotesk', sans-serif !important;
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
             }
             
             .stApp {
-                background: radial-gradient(circle at 20% 20%, #111827 0%, #0B0F17 100%) !important;
-            }
-            
-            /* Sidebar Custom Styling */
-            section[data-testid="stSidebar"] {
-                background-color: #0F172A !important;
-                border-right: 1px solid #1E293B !important;
-            }
-            
-            /* KPI Glass Cards */
-            .kpi-card {
-                background: rgba(30, 41, 59, 0.7);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                backdrop-filter: blur(12px);
-                border-radius: 12px;
-                padding: 1rem 1.25rem;
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-            }
-            .kpi-title {
-                color: #94A3B8;
-                font-size: 0.825rem;
-                font-weight: 500;
-            }
-            .kpi-val {
-                color: #38BDF8;
-                font-size: 1.75rem;
-                font-weight: 700;
-                margin-top: 0.2rem;
+                background: #0F172A !important;
             }
 
-            /* Header Neon Styling */
-            .neon-header {
-                background: linear-gradient(90deg, #1E293B 0%, #0F172A 100%);
-                border: 1px solid #334155;
-                padding: 1.25rem;
-                border-radius: 12px;
-                margin-bottom: 1.5rem;
-            }
-            .neon-header h1 {
-                color: #F8FAFC !important;
-                font-size: 1.5rem !important;
-                margin: 0 !important;
-            }
-            .neon-header p {
-                color: #38BDF8 !important;
-                font-size: 0.875rem !important;
-                margin: 0.25rem 0 0 0 !important;
-            }
-
-            /* Custom Inputs & Selectboxes */
-            .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
-                background-color: #1E293B !important;
-                color: #F8FAFC !important;
-                border: 1px solid #334155 !important;
-                border-radius: 8px !important;
-            }
-            
-            /* Dataframes Dark Palette */
-            [data-testid="stDataFrame"] {
+            /* Custom Slate Cards */
+            .slate-card {
                 background-color: #1E293B;
                 border: 1px solid #334155;
-                border-radius: 10px;
+                border-radius: 12px;
+                padding: 1.25rem;
+                margin-bottom: 1rem;
             }
 
-            /* Custom Button Overrides */
-            .stButton > button {
-                background: #1E293B !important;
-                color: #E2E8F0 !important;
+            /* Slate Metric Badges */
+            .slate-metric {
+                background: #1E293B;
+                border-left: 4px solid #10B981;
+                border-radius: 8px;
+                padding: 0.75rem 1rem;
+            }
+            .slate-metric-title {
+                color: #94A3B8;
+                font-size: 0.8rem;
+                font-weight: 500;
+            }
+            .slate-metric-value {
+                color: #F8FAFC;
+                font-size: 1.5rem;
+                font-weight: 700;
+            }
+
+            /* Form & Inputs */
+            .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
                 border: 1px solid #334155 !important;
                 border-radius: 8px !important;
-                transition: all 0.2s ease;
+            }
+
+            /* Primary Action Buttons */
+            .stButton > button {
+                background: #1E293B !important;
+                color: #F8FAFC !important;
+                border: 1px solid #475569 !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
             }
             .stButton > button:hover {
-                border-color: #38BDF8 !important;
-                color: #38BDF8 !important;
-                box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+                border-color: #10B981 !important;
+                color: #10B981 !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -607,7 +580,7 @@ def render_pending_waiting_screen(username):
 def show_success_dialog(summary):
     st.markdown(f"""
         <div style="text-align: center;">
-            <h3 style="color: #4ADE80; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
+            <h3 style="color: #10B981; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
             <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
         </div>
     """, unsafe_allow_html=True)
@@ -628,7 +601,7 @@ def show_success_dialog(summary):
 
 
 def main():
-    st.set_page_config(page_title="GIS Project Manager", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="GIS Project Manager Slate", layout="wide")
     inject_custom_css()
     initialize_database()
 
@@ -654,38 +627,18 @@ def main():
 
     projects = get_all_projects()
 
-    # --- SIDEBAR NAVIGATION ---
-    with st.sidebar:
-        st.markdown("<h2 style='color: #F8FAFC; font-size: 1.2rem; margin-bottom: 0.2rem;'>📁 ជ្រើសរើសគម្រោង</h2>", unsafe_allow_html=True)
-
+    # --- TOP CONTROL BAR ---
+    p_col1, p_col2, p_col3 = st.columns([3, 2, 1])
+    with p_col1:
+        app_title = get_app_title()
+        st.markdown(f"<h2 style='margin:0; font-size: 1.5rem; color:#F8FAFC;'>{app_title}</h2>", unsafe_allow_html=True)
+    with p_col2:
         if projects:
-            proj_dict = {f"{p[1]} (សរុប: {p[2]})": p for p in projects}
-            selected_proj_label = st.selectbox("គម្រោងសកម្ម", list(proj_dict.keys()), label_visibility="collapsed")
+            proj_dict = {f"{p[1]} (ក្បាលដី: {p[2]})": p for p in projects}
+            selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", list(proj_dict.keys()), label_visibility="collapsed")
             active_p = proj_dict[selected_proj_label]
             st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
-        else:
-            st.warning("មិនទាន់មានគម្រោងទេ។ សូមបង្កើតថ្មី។")
-
-        st.write("---")
-        st.markdown("<h3 style='color: #94A3B8; font-size: 0.9rem;'>ម៉ឺនុយបញ្ជា</h3>", unsafe_allow_html=True)
-
-        nav_choice = st.radio(
-            "Navigation",
-            options=[
-                "📋 បញ្ជីក្បាលដីសរុប",
-                "✏️ កែប្រែទិន្នន័យក្បាលដី",
-                "⏳ មិនទាន់បានពិនិត្យ",
-                "✅ បានពិនិត្យ",
-                "🚫 គ្មានទិន្នន័យ",
-                "📊 សរុបលក្ខខណ្ឌ",
-                "📜 ប្រវត្តិនៃការកែប្រែ (Logs)",
-                "⚙️ កែប្រែគម្រោង"
-            ] + (["👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)"] if is_admin else []),
-            label_visibility="collapsed"
-        )
-
-        st.write("---")
-        st.caption(f"អ្នកប្រើប្រាស់: **{current_username}**")
+    with p_col3:
         if st.button("🚪 ចាកចេញ", use_container_width=True):
             st.session_state["authenticated"] = False
             st.session_state.pop("active_project", None)
@@ -696,40 +649,47 @@ def main():
         return
 
     project_id, project_name, total_items = st.session_state["active_project"]
-    app_title = get_app_title()
 
-    # Top Banner Header
-    st.markdown(f"""
-        <div class="neon-header">
-            <h1>{app_title}</h1>
-            <p>គម្រោងសកម្ម: <b>{project_name}</b> (ក្បាលដីសរុប: {total_items})</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # Navigation Menu Items
+    nav_choices = [
+        "📋 បញ្ជីក្បាលដីសរុប",
+        "✏️ កែប្រែទិន្នន័យក្បាលដី",
+        "⏳ មិនទាន់បានពិនិត្យ",
+        "✅ បានពិនិត្យ",
+        "🚫 គ្មានទិន្នន័យ",
+        "📊 សរុបលក្ខខណ្ឌ",
+        "📜 ប្រវត្តិនៃការកែប្រែ (Logs)",
+        "⚙️ កែប្រែគម្រោង"
+    ]
+    if is_admin:
+        nav_choices.append("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)")
+
+    nav_choice = st.radio("Navigation Bar", options=nav_choices, horizontal=True, label_visibility="collapsed")
 
     df_items = get_project_items(project_id, total_items)
     df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
     df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
-    # Dynamic Stat Bar Metrics
+    # Top Slate Metric Ribbon
     m1, m2, m3, m4 = st.columns(4)
     with m1:
-        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">ក្បាលដីសរុប</div><div class="kpi-val">{total_items}</div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="slate-metric"><div class="slate-metric-title">ក្បាលដីសរុប</div><div class="slate-metric-value">{total_items}</div></div>""", unsafe_allow_html=True)
     with m2:
         checked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"])
-        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">បានពិនិត្យ</div><div class="kpi-val" style="color: #4ADE80;">{checked_count}</div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #10B981;"><div class="slate-metric-title">បានពិនិត្យ</div><div class="slate-metric-value" style="color:#10B981;">{checked_count}</div></div>""", unsafe_allow_html=True)
     with m3:
         unchecked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"])
-        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">មិនទាន់បានពិនិត្យ</div><div class="kpi-val" style="color: #FACC15;">{unchecked_count}</div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #F59E0B;"><div class="slate-metric-title">មិនទាន់បានពិនិត្យ</div><div class="slate-metric-value" style="color:#F59E0B;">{unchecked_count}</div></div>""", unsafe_allow_html=True)
     with m4:
         nodata_count = len(df_no_data_items)
-        st.markdown(f"""<div class="kpi-card"><div class="kpi-title">គ្មានទិន្នន័យ</div><div class="kpi-val" style="color: #F87171;">{nodata_count}</div></div>""", unsafe_allow_html=True)
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #EF4444;"><div class="slate-metric-title">គ្មានទិន្នន័យ</div><div class="slate-metric-value" style="color:#EF4444;">{nodata_count}</div></div>""", unsafe_allow_html=True)
 
     st.write("---")
 
     if st.session_state.get("show_save_success_dialog", False):
         show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
-    # Dynamic Screen Content rendering
+    # --- MAIN VIEW ROUTING ---
     if nav_choice == "📋 បញ្ជីក្បាលដីសរុប":
         st.subheader("📋 បញ្ជីក្បាលដីសរុប")
         st.dataframe(df_valid_items, use_container_width=True)
@@ -737,11 +697,9 @@ def main():
     elif nav_choice == "✏️ កែប្រែទិន្នន័យក្បាលដី":
         st.subheader("✏️ កែប្រែទិន្នន័យក្បាលដី")
 
-        c_search, c_space = st.columns([2, 2])
-        with c_search:
-            code_to_update = st.number_input("បញ្ចូលលេខក្បាលដី", min_value=1, max_value=total_items, step=1)
-
+        code_to_update = st.number_input("បញ្ចូលលេខក្បាលដី", min_value=1, max_value=total_items, step=1)
         current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+
         curr_status = current_row["ស្ថានភាព"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
         curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
         curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
@@ -749,7 +707,7 @@ def main():
 
         default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
 
-        with st.form("update_item_glass_form"):
+        with st.form("slate_update_form"):
             col1, col2 = st.columns(2)
             with col1:
                 is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
@@ -830,22 +788,36 @@ def main():
     elif nav_choice == "⚙️ កែប្រែគម្រោង":
         st.subheader("⚙️ ការកំណត់ និងបង្កើតគម្រោង")
 
-        with st.form("new_project_form"):
-            st.markdown("#### បង្កើតគម្រោងថ្មី")
-            p_name_inp = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងថ្មី")
-            p_items_inp = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
-            create_p_btn = st.form_submit_button("បង្កើតគម្រោង", use_container_width=True)
+        col_left, col_right = st.columns(2)
+        with col_left:
+            with st.form("new_proj_form"):
+                st.markdown("#### បង្កើតគម្រោងថ្មី")
+                p_name_inp = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងថ្មី")
+                p_items_inp = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
+                if st.form_submit_button("បង្កើតគម្រោង", use_container_width=True):
+                    pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
+                    st.session_state["active_project"] = (pid, pname, pitems)
+                    st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
+                    st.rerun()
 
-            if create_p_btn:
-                pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
-                st.session_state["active_project"] = (pid, pname, pitems)
-                st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
-                st.rerun()
+        with col_right:
+            with st.form("edit_proj_form"):
+                st.markdown("#### កែប្រែគម្រោងបច្ចុប្បន្ន")
+                edit_name = st.text_input("ឈ្មោះគម្រោងថ្មី", value=project_name)
+                edit_total = st.number_input("ក្បាលដីសរុបថ្មី", min_value=1, value=total_items)
+                if st.form_submit_button("ធ្វើបច្ចុប្បន្នភាពគម្រោង", use_container_width=True):
+                    success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
+                    if success:
+                        st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
     elif nav_choice == "👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)" and is_admin:
         st.subheader("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin Control)")
 
-        with st.form("app_title_form"):
+        with st.form("app_title_form_slate"):
             new_title_val = st.text_input("ចំណងជើងកម្មវិធី (App Title)", value=app_title)
             if st.form_submit_button("រក្សាទុកចំណងជើង", use_container_width=True):
                 set_app_title(new_title_val.strip())
