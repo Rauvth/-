@@ -530,4 +530,258 @@ def show_success_dialog(summary):
     st.markdown(f"""
         <div style="text-align: center;">
             <h3 style="color: #10B981; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
-       
+       <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    summary_df = pd.DataFrame([
+        {"ព័ត៌មាន": "ក្បាលដី", "ទិន្នន័យ": summary['code']},
+        {"ព័ត៌មាន": "ស្ថានភាព", "ទិន្នន័យ": summary['status']},
+        {"ព័ត៌មាន": "លេខទូស័ព្ទ", "ទិន្នន័យ": summary['phone']},
+        {"ព័ត៌មាន": "លក្ខខណ្ឌ", "ទិន្នន័យ": summary['condition']},
+        {"ព័ត៌មាន": "ព័ត៌មានខុសឆ្គង", "ទិន្នន័យ": summary['name_errors']},
+        {"ព័ត៌មាន": "ផ្សេងៗ", "ទិន្នន័យ": summary['notes']},
+        {"ព័ត៌មាន": "កាលបរិច្ឆេទ & ម៉ោង", "ទិន្នន័យ": summary['timestamp']},
+    ])
+
+    st.table(summary_df)
+    if st.button("បិទផ្ទាំង", use_container_width=True):
+        st.session_state.pop("show_save_success_dialog", None)
+        st.rerun()
+
+
+def main():
+    st.set_page_config(page_title="GIS Project Manager Slate", layout="wide")
+    inject_custom_css()
+    initialize_database()
+
+    if "pending_user" in st.session_state:
+        render_pending_waiting_screen(st.session_state["pending_user"])
+        return
+
+    if not st.session_state.get("authenticated", False):
+        render_auth_page()
+        return
+
+    current_username = st.session_state.get("username", "Guest")
+    user_data = get_user_from_db(current_username)
+
+    if not user_data or user_data[4] == "inactive":
+        st.error("គណនីត្រូវបញ្ឈប់។")
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+    current_role = user_data[3]
+    st.session_state["role"] = current_role
+    is_admin = current_role in ["admin", "temp_admin"]
+
+    projects = get_all_projects()
+
+    # --- TOP CONTROL BAR ---
+    p_col1, p_col2, p_col3 = st.columns([3, 2, 1])
+    with p_col1:
+        app_title = get_app_title()
+        st.markdown(f"<h2 style='margin:0; font-size: 1.5rem; color:#F8FAFC;'>{app_title}</h2>", unsafe_allow_html=True)
+    with p_col2:
+        if projects:
+            proj_dict = {f"{p[1]} (ក្បាលដី: {p[2]})": p for p in projects}
+            selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", list(proj_dict.keys()), label_visibility="collapsed")
+            active_p = proj_dict[selected_proj_label]
+            st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
+    with p_col3:
+        if st.button("🚪 ចាកចេញ", use_container_width=True):
+            st.session_state["authenticated"] = False
+            st.session_state.pop("active_project", None)
+            st.rerun()
+
+    if "active_project" not in st.session_state:
+        st.info("សូមជ្រើសរើស ឬបង្កើតគម្រោងដើម្បីបន្ត។")
+        return
+
+    project_id, project_name, total_items = st.session_state["active_project"]
+
+    nav_choices = [
+        "📋 បញ្ជីក្បាលដីសរុប",
+        "✏️ កែប្រែទិន្នន័យក្បាលដី",
+        "⏳ មិនទាន់បានពិនិត្យ",
+        "✅ បានពិនិត្យ",
+        "🚫 គ្មានទិន្នន័យ",
+        "📊 សរុបលក្ខខណ្ឌ",
+        "📜 ប្រវត្តិនៃការកែប្រែ (Logs)",
+        "⚙️ កែប្រែគម្រោង"
+    ]
+    if is_admin:
+        nav_choices.append("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)")
+
+    nav_choice = st.radio("Navigation Bar", options=nav_choices, horizontal=True, label_visibility="collapsed")
+
+    df_items = get_project_items(project_id, total_items)
+    df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
+    df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
+
+    # Dynamic Stat Bar Metrics
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"""<div class="slate-metric"><div class="slate-metric-title">ក្បាលដីសរុប</div><div class="slate-metric-value">{total_items}</div></div>""", unsafe_allow_html=True)
+    with m2:
+        checked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"])
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #10B981;"><div class="slate-metric-title">បានពិនិត្យ</div><div class="slate-metric-value" style="color:#10B981;">{checked_count}</div></div>""", unsafe_allow_html=True)
+    with m3:
+        unchecked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"])
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #F59E0B;"><div class="slate-metric-title">មិនទាន់បានពិនិត្យ</div><div class="slate-metric-value" style="color:#F59E0B;">{unchecked_count}</div></div>""", unsafe_allow_html=True)
+    with m4:
+        nodata_count = len(df_no_data_items)
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #EF4444;"><div class="slate-metric-title">គ្មានទិន្នន័យ</div><div class="slate-metric-value" style="color:#EF4444;">{nodata_count}</div></div>""", unsafe_allow_html=True)
+
+    st.write("---")
+
+    if st.session_state.get("show_save_success_dialog", False):
+        show_success_dialog(st.session_state.get("last_saved_summary", {}))
+
+    # --- MAIN VIEW ROUTING ---
+    if nav_choice == "📋 បញ្ជីក្បាលដីសរុប":
+        st.subheader("📋 បញ្ជីក្បាលដីសរុប")
+        st.dataframe(df_valid_items, use_container_width=True)
+
+    elif nav_choice == "✏️ កែប្រែទិន្នន័យក្បាលដី":
+        st.subheader("✏️ កែប្រែទិន្នន័យក្បាលដី")
+
+        code_to_update = st.number_input("បញ្ចូលលេខក្បាលដី", min_value=1, max_value=total_items, step=1)
+        current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+
+        curr_status = current_row["ស្ថានភាព"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+        curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+        curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+        curr_cond_str = current_row["លក្ខខណ្ឌ"] if (current_row is not None and current_row["លក្ខខណ្ឌ"] not in ["-", "ធម្មតា"]) else ""
+        curr_err_str = current_row["ព័ត៌មានខុសឆ្គង"] if (current_row is not None and current_row["ព័ត៌មានខុសឆ្គង"] not in ["-", "គ្មាន"]) else ""
+
+        default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+        default_err_names = [e.strip() for e in curr_err_str.split(", ") if e.strip() in ERR_NAME_OPTIONS]
+
+        with st.form("slate_update_form"):
+            col1, col2 = st.columns(2)
+            with col1:
+                is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
+                phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
+
+            with col2:
+                selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions)
+                # ⬇️ Multi-select box added right below the condition box
+                selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names)
+
+            curr_cambodia_dt = get_cambodia_now()
+            dt_col1, dt_col2 = st.columns(2)
+            with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
+            with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
+
+            save_btn = st.form_submit_button("រក្សាទុកទិន្នន័យ", use_container_width=True)
+
+            if save_btn:
+                new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+                final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+
+                if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
+                    selected_conditions.append("គ្មានទិន្នន័យ")
+
+                condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
+                name_err_str = ", ".join(selected_name_errors) if selected_name_errors else "គ្មាន"
+                combined_dt = datetime.datetime.combine(selected_date, selected_time)
+                formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+
+                update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+
+                st.session_state["last_saved_summary"] = {
+                    "code": str(code_to_update),
+                    "status": new_status,
+                    "phone": phone_input,
+                    "notes": final_notes,
+                    "condition": condition_str,
+                    "name_errors": name_err_str,
+                    "timestamp": formatted_dt
+                }
+                st.session_state["show_save_success_dialog"] = True
+                st.rerun()
+
+    elif nav_choice == "⏳ មិនទាន់បានពិនិត្យ":
+        st.subheader("⏳ បញ្ជីក្បាលដីមិនទាន់បានពិនិត្យ")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"], use_container_width=True)
+
+    elif nav_choice == "✅ បានពិនិត្យ":
+        st.subheader("✅ បញ្ជីក្បាលដីបានពិនិត្យរួចរាល់")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"], use_container_width=True)
+
+    elif nav_choice == "🚫 គ្មានទិន្នន័យ":
+        st.subheader("🚫 បញ្ជីក្បាលដីគ្មានទិន្នន័យ")
+        st.dataframe(df_no_data_items, use_container_width=True)
+
+    elif nav_choice == "📊 សរុបលក្ខខណ្ឌ":
+        st.subheader("📊 សរុបតាមលក្ខខណ្ឌ")
+        summary_data = []
+        for option in CONDITION_OPTIONS:
+            matching_codes = []
+            for _, row in df_items.iterrows():
+                item_cond = row["លក្ខខណ្ឌ"]
+                if item_cond and item_cond not in ["-", "ធម្មតា"]:
+                    cond_list = [c.strip() for c in item_cond.split(",")]
+                    if option in cond_list:
+                        matching_codes.append(str(row["ក្បាលដី"]))
+
+            summary_data.append({
+                "ប្រភេទលក្ខខណ្ឌ": option,
+                "ចំនួនសរុប": len(matching_codes),
+                "បញ្ជីលេខក្បាលដី": ", ".join(matching_codes) if matching_codes else ""
+            })
+
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+
+    elif nav_choice == "📜 ប្រវត្តិនៃការកែប្រែ (Logs)":
+        st.subheader("📜 ប្រវត្តិនៃការកែប្រែ (Logs)")
+        st.dataframe(get_project_history(project_id), use_container_width=True)
+
+    elif nav_choice == "⚙️ កែប្រែគម្រោង":
+        st.subheader("⚙️ ការកំណត់ និងបង្កើតគម្រោង")
+
+        col_left, col_right = st.columns(2)
+        with col_left:
+            with st.form("new_proj_form"):
+                st.markdown("#### បង្កើតគម្រោងថ្មី")
+                p_name_inp = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងថ្មី")
+                p_items_inp = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
+                if st.form_submit_button("បង្កើតគម្រោង", use_container_width=True):
+                    pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
+                    st.session_state["active_project"] = (pid, pname, pitems)
+                    st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
+                    st.rerun()
+
+        with col_right:
+            with st.form("edit_proj_form"):
+                st.markdown("#### កែប្រែគម្រោងបច្ចុប្បន្ន")
+                edit_name = st.text_input("ឈ្មោះគម្រោងថ្មី", value=project_name)
+                edit_total = st.number_input("ក្បាលដីសរុបថ្មី", min_value=1, value=total_items)
+                if st.form_submit_button("ធ្វើបច្ចុប្បន្នភាពគម្រោង", use_container_width=True):
+                    success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
+                    if success:
+                        st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+    elif nav_choice == "👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)" and is_admin:
+        st.subheader("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin Control)")
+
+        with st.form("app_title_form_slate"):
+            new_title_val = st.text_input("ចំណងជើងកម្មវិធី (App Title)", value=app_title)
+            if st.form_submit_button("រក្សាទុកចំណងជើង", use_container_width=True):
+                set_app_title(new_title_val.strip())
+                st.rerun()
+
+        st.write("---")
+        df_u = get_all_users()
+        st.dataframe(df_u, use_container_width=True)
+
+
+if __name__ == "__main__":
+    main()
