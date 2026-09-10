@@ -594,8 +594,23 @@ def main():
             st.session_state.pop("active_project", None)
             st.rerun()
 
-    if "active_project" not in st.session_state:
-        st.info("សូមជ្រើសរើស ឬបង្កើតគម្រោងដើម្បីបន្ត។")
+    # --- FALLBACK WHEN NO PROJECTS EXIST ---
+    if "active_project" not in st.session_state or not projects:
+        st.warning("⚠️ មិនទាន់មានគម្រោងនៅក្នុងប្រព័ន្ធទេ។ សូមបង្កើតគម្រោងដំបូងរបស់អ្នកខាងក្រោម៖")
+        with st.form("first_project_creation_form"):
+            st.subheader("➕ បង្កើតគម្រោងដំបូង")
+            init_p_name = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងទី១")
+            init_p_items = st.number_input("ចំនួនក្បាលដីសរុប", min_value=1, value=100)
+            submit_init_p = st.form_submit_button("បង្កើតគម្រោង", use_container_width=True)
+
+            if submit_init_p:
+                if init_p_name.strip():
+                    pid, pname, pitems = create_new_project(init_p_name.strip(), int(init_p_items))
+                    st.session_state["active_project"] = (pid, pname, pitems)
+                    st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
+                    st.rerun()
+                else:
+                    st.error("សូមបញ្ចូលឈ្មោះគម្រោង!")
         return
 
     project_id, project_name, total_items = st.session_state["active_project"]
@@ -668,7 +683,6 @@ def main():
 
             with col2:
                 selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions)
-                # ⬇️ Multi-select box added right below the condition box
                 selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names)
 
             curr_cambodia_dt = get_cambodia_now()
