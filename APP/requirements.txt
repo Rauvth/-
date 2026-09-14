@@ -1,1 +1,2 @@
-psycopg2-binar
+streamlit
+psycopg2-binary
