@@ -66,8 +66,13 @@ def initialize_database():
         )
     """)
 
-    cursor.execute("PRAGMA table_info(users)")
-    user_columns = [col[1] for col in cursor.fetchall()]
+    cursor.execute("""
+    SELECT column_name 
+    FROM information_schema.columns 
+    WHERE table_name = 'users'
+""")
+user_columns = [col[0] for col in cursor.fetchall()]
+
     if "temp_admin_expires" not in user_columns:
         cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
 
