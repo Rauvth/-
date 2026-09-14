@@ -1,4 +1,5 @@
 import psycopg2
+from psycopg2 import pool
 import datetime
 import time
 from zoneinfo import ZoneInfo
@@ -42,9 +43,18 @@ ERR_NAME_OPTIONS = [
 ]
 
 
+# --- 🚀 SPEED FIX 1: CONNECTION POOLING ---
+@st.cache_resource
+def init_db_pool():
+    return psycopg2.pool.SimpleConnectionPool(1, 10, st.secrets["postgres"]["url"])
+
+
 def get_db_connection():
-    """Returns a connection to the PostgreSQL database."""
-    return psycopg2.connect(st.secrets["postgres"]["url"])
+    return init_db_pool().getconn()
+
+
+def release_db_connection(conn):
+    init_db_pool().putconn(conn)
 
 
 def get_cambodia_now():
@@ -106,7 +116,6 @@ def initialize_database():
         )
     """)
 
-    # --- AUTO-CREATE DEFAULT PROJECT IF NONE EXISTS ---
     cursor.execute("SELECT COUNT(*) FROM projects")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
@@ -161,15 +170,16 @@ def initialize_database():
         cursor.execute("ALTER TABLE logs ADD COLUMN name_errors TEXT DEFAULT ''")
 
     conn.commit()
-    conn.close()
+    release_db_connection(conn)
 
 
+@st.cache_data(ttl=300)
 def get_app_title():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
     row = cursor.fetchone()
-    conn.close()
+    release_db_connection(conn)
     return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
 
 
@@ -177,11 +187,12 @@ def set_app_title(new_title):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        INSERT INTO app_settings (key, value) VALUES ('app_title', %s)
+        INSERT INTO app_settings (key, value) VALUES (%s, %s)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    """, (new_title,))
+    """, ('app_title', new_title))
     conn.commit()
-    conn.close()
+    release_db_connection(conn)
+    st.cache_data.clear()
 
 
 def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", name_errors="", custom_timestamp=""):
@@ -195,7 +206,7 @@ def log_activity(project_id, code, action_type, status="", phone="", notes="", c
     """, (project_id, code, action_type, status, phone, notes, condition, name_errors, timestamp))
 
     conn.commit()
-    conn.close()
+    release_db_connection(conn)
 
 
 def check_and_expire_temp_admins():
@@ -215,7 +226,7 @@ def check_and_expire_temp_admins():
             except ValueError:
                 pass
     conn.commit()
-    conn.close()
+    release_db_connection(conn)
 
 
 def get_user_from_db(username):
@@ -225,7 +236,7 @@ def get_user_from_db(username):
     cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
                    (username,))
     row = cursor.fetchone()
-    conn.close()
+    release_db_connection(conn)
     return row
 
 
@@ -239,10 +250,10 @@ def register_user(username, password, requested_role):
             VALUES (%s, %s, %s, 'pending', %s)
         """, (username, password, requested_role, created_at))
         conn.commit()
-        conn.close()
+        release_db_connection(conn)
         return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
     except psycopg2.IntegrityError:
-        conn.close()
+        release_db_connection(conn)
         return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
 
 
@@ -252,16 +263,17 @@ def get_all_users():
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
     rows = cursor.fetchall()
-    conn.close()
+    release_db_connection(conn)
     return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
 
 
+@st.cache_data(ttl=60)
 def get_all_projects():
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
     projects = cursor.fetchall()
-    conn.close()
+    release_db_connection(conn)
     return projects
 
 
@@ -279,7 +291,8 @@ def create_new_project(name, total_items):
         cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
         row = cursor.fetchone()
         project_id, name, total_items = row[0], row[1], row[2]
-    conn.close()
+    release_db_connection(conn)
+    st.cache_data.clear()
     return project_id, name, total_items
 
 
@@ -290,13 +303,16 @@ def update_project_details(project_id, new_name, new_total_items):
         cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
                        (new_name, new_total_items, project_id))
         conn.commit()
-        conn.close()
+        release_db_connection(conn)
+        st.cache_data.clear()
         return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
     except psycopg2.IntegrityError:
-        conn.close()
+        release_db_connection(conn)
         return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
+# --- 🚀 SPEED FIX 2: CACHED ITEM FETCHING ---
+@st.cache_data(ttl=30)
 def get_project_items(project_id, total_items):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -308,7 +324,7 @@ def get_project_items(project_id, total_items):
     """, (project_id,))
 
     existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
-    conn.close()
+    release_db_connection(conn)
 
     data = []
     for code in range(1, total_items + 1):
@@ -357,7 +373,7 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, name_er
         """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
 
     conn.commit()
-    conn.close()
+    release_db_connection(conn)
 
     log_activity(
         project_id=project_id,
@@ -370,8 +386,10 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, name_er
         name_errors=name_errors,
         custom_timestamp=custom_timestamp
     )
+    st.cache_data.clear()
 
 
+@st.cache_data(ttl=60)
 def get_project_history(project_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -382,7 +400,7 @@ def get_project_history(project_id):
         ORDER BY id DESC
     """, (project_id,))
     logs = cursor.fetchall()
-    conn.close()
+    release_db_connection(conn)
 
     data = []
     for log in logs:
@@ -410,7 +428,6 @@ def inject_custom_css():
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
             
-            /* Slate Deep Theme */
             html, body, [class*="css"] {
                 font-family: 'Kantumruy Pro', 'Space Grotesk', sans-serif !important;
                 background-color: #0F172A !important;
@@ -445,11 +462,6 @@ def inject_custom_css():
                 border-radius: 8px !important;
             }
 
-            /* Prevent mobile keyboard popup on select inputs */
-            div[data-baseweb="select"] input {
-                inputmode: none !important;
-            }
-
             .stButton > button {
                 background: #1E293B !important;
                 color: #F8FAFC !important;
@@ -460,23 +472,6 @@ def inject_custom_css():
             .stButton > button:hover {
                 border-color: #10B981 !important;
                 color: #10B981 !important;
-            }
-
-            /* Sticky Floating Save Button */
-            div[data-testid="stForm"] {
-                position: relative;
-            }
-            div[data-testid="stForm"] button[kind="formSubmit"] {
-                position: sticky !important;
-                bottom: 1rem !important;
-                z-index: 99999 !important;
-                background: #10B981 !important;
-                color: #FFFFFF !important;
-                border-color: #059669 !important;
-                box-shadow: 0 4px 14px rgba(0,0,0,0.4) !important;
-            }
-            div[data-testid="stForm"] button[kind="formSubmit"]:hover {
-                background: #059669 !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -523,7 +518,6 @@ def render_auth_page():
                             st.session_state["authenticated"] = True
                             st.session_state["username"] = username
                             st.session_state["role"] = db_role
-                            st.session_state["show_startup_popup"] = True
                             st.session_state.pop("pending_user", None)
                             st.rerun()
                     else:
@@ -570,7 +564,6 @@ def render_pending_waiting_screen(username):
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.session_state["role"] = user[3]
-                st.session_state["show_startup_popup"] = True
                 st.session_state.pop("pending_user", None)
                 st.rerun()
 
@@ -627,7 +620,6 @@ def main():
 
     projects = get_all_projects()
 
-    # --- TOP CONTROL BAR ---
     p_col1, p_col2, p_col3 = st.columns([3, 2, 1])
     with p_col1:
         app_title = get_app_title()
@@ -636,7 +628,6 @@ def main():
         if projects:
             proj_dict = {f"{p[1]} (ក្បាលដី: {p[2]})": p for p in projects}
 
-            # AUTO-SELECT FIRST PROJECT IF NOT SET
             if "active_project" not in st.session_state or st.session_state["active_project"] not in projects:
                 default_p = projects[0]
                 st.session_state["active_project"] = (default_p[0], default_p[1], default_p[2])
@@ -680,7 +671,6 @@ def main():
     df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
     df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
-    # Dynamic Stat Bar Metrics
     m1, m2, m3, m4 = st.columns(4)
     with m1:
         st.markdown(f"""<div class="slate-metric"><div class="slate-metric-title">ក្បាលដីសរុប</div><div class="slate-metric-value">{total_items}</div></div>""", unsafe_allow_html=True)
@@ -699,7 +689,6 @@ def main():
     if st.session_state.get("show_save_success_dialog", False):
         show_success_dialog(st.session_state.get("last_saved_summary", {}))
 
-    # --- MAIN VIEW ROUTING ---
     if nav_choice == "📋 បញ្ជីក្បាលដីសរុប":
         st.subheader("📋 បញ្ជីក្បាលដីសរុប")
         st.dataframe(df_valid_items, use_container_width=True)
@@ -719,50 +708,53 @@ def main():
         default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
         default_err_names = [e.strip() for e in curr_err_str.split(", ") if e.strip() in ERR_NAME_OPTIONS]
 
-        with st.form("slate_update_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
-                no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
-                phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
-                notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
+        col1, col2 = st.columns(2)
+        with col1:
+            is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+            no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
+            phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+            notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
-            with col2:
-                selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions, placeholder="ជ្រើសរើសលក្ខខណ្ឌ")
-                selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names, placeholder="ជ្រើសរើសព័ត៌មានខុសឆ្គង")
+        with col2:
+            # 📱 KEYBOARD FIX: st.pills PREVENTS MOBILE KEYBOARD FROM POPPING UP
+            selected_conditions = st.pills("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions, selection_mode="multi")
+            selected_name_errors = st.pills("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names, selection_mode="multi")
 
-            curr_cambodia_dt = get_cambodia_now()
-            dt_col1, dt_col2 = st.columns(2)
-            with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
-            with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
+        curr_cambodia_dt = get_cambodia_now()
+        dt_col1, dt_col2 = st.columns(2)
+        with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
+        with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
-            save_btn = st.form_submit_button("រក្សាទុកទិន្នន័យ", use_container_width=True)
+        save_btn = st.button("💾 រក្សាទុកទិន្នន័យ", type="primary", use_container_width=True)
 
-            if save_btn:
-                new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
-                final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+        if save_btn:
+            new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+            final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
 
-                if no_data_checked and "គ្មានទិន្នន័យ" not in selected_conditions:
-                    selected_conditions.append("គ្មានទិន្នន័យ")
+            selected_cond_list = list(selected_conditions) if selected_conditions else []
+            if no_data_checked and "គ្មានទិន្នន័យ" not in selected_cond_list:
+                selected_cond_list.append("គ្មានទិន្នន័យ")
 
-                condition_str = ", ".join(selected_conditions) if selected_conditions else "ធម្មតា"
-                name_err_str = ", ".join(selected_name_errors) if selected_name_errors else "គ្មាន"
-                combined_dt = datetime.datetime.combine(selected_date, selected_time)
-                formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+            condition_str = ", ".join(selected_cond_list) if selected_cond_list else "ធម្មតា"
+            name_err_list = list(selected_name_errors) if selected_name_errors else []
+            name_err_str = ", ".join(name_err_list) if name_err_list else "គ្មាន"
 
-                update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+            combined_dt = datetime.datetime.combine(selected_date, selected_time)
+            formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                st.session_state["last_saved_summary"] = {
-                    "code": str(code_to_update),
-                    "status": new_status,
-                    "phone": phone_input,
-                    "notes": final_notes,
-                    "condition": condition_str,
-                    "name_errors": name_err_str,
-                    "timestamp": formatted_dt
-                }
-                st.session_state["show_save_success_dialog"] = True
-                st.rerun()
+            update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+
+            st.session_state["last_saved_summary"] = {
+                "code": str(code_to_update),
+                "status": new_status,
+                "phone": phone_input,
+                "notes": final_notes,
+                "condition": condition_str,
+                "name_errors": name_err_str,
+                "timestamp": formatted_dt
+            }
+            st.session_state["show_save_success_dialog"] = True
+            st.rerun()
 
     elif nav_choice == "⏳ មិនទាន់បានពិនិត្យ":
         st.subheader("⏳ បញ្ជីក្បាលដីមិនទាន់បានពិនិត្យ")
