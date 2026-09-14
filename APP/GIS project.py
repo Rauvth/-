@@ -43,7 +43,7 @@ ERR_NAME_OPTIONS = [
 ]
 
 
-# --- 🚀 SPEED FIX 1: CONNECTION POOLING ---
+# --- 🚀 CONNECTION POOLING ---
 @st.cache_resource
 def init_db_pool():
     return psycopg2.pool.SimpleConnectionPool(1, 10, st.secrets["postgres"]["url"])
@@ -58,12 +58,21 @@ def release_db_connection(conn):
 
 
 def get_cambodia_now():
-    """Returns current datetime in Cambodia timezone."""
     return datetime.datetime.now(CAMBODIA_TZ)
 
 
+def get_client_ip():
+    """Retrieve client IP address from Streamlit headers."""
+    try:
+        headers = st.context.headers
+        if "x-forwarded-for" in headers:
+            return headers["x-forwarded-for"].split(",")[0].strip()
+        return headers.get("host", "127.0.0.1")
+    except Exception:
+        return "127.0.0.1"
+
+
 def initialize_database():
-    """Sets up database tables including multi-user accounts, temporary admin roles, and status management."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -80,14 +89,12 @@ def initialize_database():
     """)
 
     cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'users'
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            ip_address TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            login_time TEXT NOT NULL
+        )
     """)
-    user_columns = [col[0] for col in cursor.fetchall()]
-
-    if "temp_admin_expires" not in user_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -123,31 +130,21 @@ def initialize_database():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items (
             id SERIAL PRIMARY KEY,
-            project_id INTEGER,
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
             code INTEGER,
             status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
             updated_at TEXT DEFAULT '',
             customer_phone TEXT DEFAULT '',
             notes TEXT DEFAULT '',
             condition TEXT DEFAULT '',
-            name_errors TEXT DEFAULT '',
-            FOREIGN KEY (project_id) REFERENCES projects (id)
+            name_errors TEXT DEFAULT ''
         )
     """)
 
     cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'items'
-    """)
-    item_columns = [col[0] for col in cursor.fetchall()]
-    if "name_errors" not in item_columns:
-        cursor.execute("ALTER TABLE items ADD COLUMN name_errors TEXT DEFAULT ''")
-
-    cursor.execute("""
         CREATE TABLE IF NOT EXISTS logs (
             id SERIAL PRIMARY KEY,
-            project_id INTEGER,
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
             code INTEGER,
             action_type TEXT,
             status TEXT DEFAULT '',
@@ -155,20 +152,41 @@ def initialize_database():
             notes TEXT DEFAULT '',
             condition TEXT DEFAULT '',
             name_errors TEXT DEFAULT '',
-            timestamp TEXT,
-            FOREIGN KEY (project_id) REFERENCES projects (id)
+            timestamp TEXT
         )
     """)
 
-    cursor.execute("""
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'logs'
-    """)
-    log_columns = [col[0] for col in cursor.fetchall()]
-    if "name_errors" not in log_columns:
-        cursor.execute("ALTER TABLE logs ADD COLUMN name_errors TEXT DEFAULT ''")
+    conn.commit()
+    release_db_connection(conn)
 
+
+# --- 🌐 IP SESSION MANAGEMENT ---
+def register_ip_session(ip, username):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+    cursor.execute("""
+        INSERT INTO user_sessions (ip_address, username, login_time)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (ip_address) DO UPDATE SET username = EXCLUDED.username, login_time = EXCLUDED.login_time
+    """, (ip, username, now_str))
+    conn.commit()
+    release_db_connection(conn)
+
+
+def get_username_by_ip(ip):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username FROM user_sessions WHERE ip_address = %s", (ip,))
+    row = cursor.fetchone()
+    release_db_connection(conn)
+    return row[0] if row else None
+
+
+def clear_ip_session(ip):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_sessions WHERE ip_address = %s", (ip,))
     conn.commit()
     release_db_connection(conn)
 
@@ -193,20 +211,6 @@ def set_app_title(new_title):
     conn.commit()
     release_db_connection(conn)
     st.cache_data.clear()
-
-
-def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", name_errors="", custom_timestamp=""):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    timestamp = custom_timestamp if custom_timestamp else get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-
-    cursor.execute("""
-        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (project_id, code, action_type, status, phone, notes, condition, name_errors, timestamp))
-
-    conn.commit()
-    release_db_connection(conn)
 
 
 def check_and_expire_temp_admins():
@@ -284,8 +288,6 @@ def create_new_project(name, total_items):
         cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
         project_id = cursor.fetchone()[0]
         conn.commit()
-        log_activity(project_id, None, "បានបង្កើតគម្រោង",
-                     notes=f"បានបង្កើតគម្រោង '{name}' ដែលមានក្បាលដីសរុប {total_items}")
     except psycopg2.IntegrityError:
         conn.rollback()
         cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
@@ -311,9 +313,25 @@ def update_project_details(project_id, new_name, new_total_items):
         return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
-# --- 🚀 SPEED FIX 2: CACHED ITEM FETCHING ---
-@st.cache_data(ttl=30)
-def get_project_items(project_id, total_items):
+# --- 🗑️ DELETE PROJECT FUNCTIONALITY ---
+def delete_project_by_id(project_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM items WHERE project_id = %s", (project_id,))
+        cursor.execute("DELETE FROM logs WHERE project_id = %s", (project_id,))
+        cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+        conn.commit()
+        release_db_connection(conn)
+        st.cache_data.clear()
+        return True, "បានលុបគម្រោងជោគជ័យ!"
+    except Exception as e:
+        conn.rollback()
+        release_db_connection(conn)
+        return False, f"កំហុសក្នុងការលុបគម្រោង: {str(e)}"
+
+
+def load_project_items(project_id, total_items):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
@@ -358,6 +376,7 @@ def is_no_data(row):
 def update_item_in_db(project_id, code, status, phone, notes, condition, name_errors, custom_timestamp):
     conn = get_db_connection()
     cursor = conn.cursor()
+
     cursor.execute("SELECT id FROM items WHERE project_id = %s AND code = %s", (project_id, code))
     item = cursor.fetchone()
 
@@ -372,24 +391,15 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, name_er
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
 
+    cursor.execute("""
+        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (project_id, code, "កែប្រែទិន្នន័យ", status, phone, notes, condition, name_errors, custom_timestamp))
+
     conn.commit()
     release_db_connection(conn)
 
-    log_activity(
-        project_id=project_id,
-        code=code,
-        action_type="កែប្រែទិន្នន័យ",
-        status=status,
-        phone=phone,
-        notes=notes,
-        condition=condition,
-        name_errors=name_errors,
-        custom_timestamp=custom_timestamp
-    )
-    st.cache_data.clear()
 
-
-@st.cache_data(ttl=60)
 def get_project_history(project_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -397,7 +407,7 @@ def get_project_history(project_id):
         SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
         FROM logs 
         WHERE project_id = %s 
-        ORDER BY id DESC
+        ORDER BY id DESC LIMIT 200
     """, (project_id,))
     logs = cursor.fetchall()
     release_db_connection(conn)
@@ -426,17 +436,14 @@ def get_project_history(project_id):
 def inject_custom_css():
     st.markdown("""
         <style>
-            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&display=swap');
             
             html, body, [class*="css"] {
-                font-family: 'Kantumruy Pro', 'Space Grotesk', sans-serif !important;
+                font-family: 'Kantumruy Pro', sans-serif !important;
                 background-color: #0F172A !important;
                 color: #F8FAFC !important;
             }
-            
-            .stApp {
-                background: #0F172A !important;
-            }
+            .stApp { background: #0F172A !important; }
 
             .slate-metric {
                 background: #1E293B;
@@ -444,16 +451,8 @@ def inject_custom_css():
                 border-radius: 8px;
                 padding: 0.75rem 1rem;
             }
-            .slate-metric-title {
-                color: #94A3B8;
-                font-size: 0.8rem;
-                font-weight: 500;
-            }
-            .slate-metric-value {
-                color: #F8FAFC;
-                font-size: 1.5rem;
-                font-weight: 700;
-            }
+            .slate-metric-title { color: #94A3B8; font-size: 0.8rem; font-weight: 500; }
+            .slate-metric-value { color: #F8FAFC; font-size: 1.5rem; font-weight: 700; }
 
             .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
                 background-color: #0F172A !important;
@@ -463,21 +462,20 @@ def inject_custom_css():
             }
 
             .stButton > button {
-                background: #1E293B !important;
-                color: #F8FAFC !important;
-                border: 1px solid #475569 !important;
+                background: #10B981 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #059669 !important;
                 border-radius: 8px !important;
                 font-weight: 600 !important;
             }
             .stButton > button:hover {
-                border-color: #10B981 !important;
-                color: #10B981 !important;
+                background: #059669 !important;
             }
         </style>
     """, unsafe_allow_html=True)
 
 
-def render_auth_page():
+def render_auth_page(client_ip):
     st.markdown("""
         <div style="text-align: center; max-width: 420px; margin: 3rem auto 1rem auto;">
             <h1 style="font-size: 1.8rem; font-weight: 700; color: #F8FAFC;">ប្រព័ន្ធគ្រប់គ្រងបិតផ្សាយ</h1>
@@ -515,6 +513,7 @@ def render_auth_page():
                                 st.error("គណនីនេះគ្មានសិទ្ធិជា Admin ទេ។")
                                 return
 
+                            register_ip_session(client_ip, username)
                             st.session_state["authenticated"] = True
                             st.session_state["username"] = username
                             st.session_state["role"] = db_role
@@ -561,6 +560,8 @@ def render_pending_waiting_screen(username):
         elif status == "approved":
             st.success(f"🎉 **បានអនុម័តជោគជ័យ!**\n\nស្វាគមន៍ **{username}**!")
             if st.button("ចូលទៅកាន់ Dashboard", use_container_width=True):
+                client_ip = get_client_ip()
+                register_ip_session(client_ip, username)
                 st.session_state["authenticated"] = True
                 st.session_state["username"] = username
                 st.session_state["role"] = user[3]
@@ -598,12 +599,24 @@ def main():
     inject_custom_css()
     initialize_database()
 
+    client_ip = get_client_ip()
+
+    # --- AUTO LOGIN USING TRACKED IP ---
+    if not st.session_state.get("authenticated", False):
+        saved_username = get_username_by_ip(client_ip)
+        if saved_username:
+            user = get_user_from_db(saved_username)
+            if user and user[4] == "approved":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = user[1]
+                st.session_state["role"] = user[3]
+
     if "pending_user" in st.session_state:
         render_pending_waiting_screen(st.session_state["pending_user"])
         return
 
     if not st.session_state.get("authenticated", False):
-        render_auth_page()
+        render_auth_page(client_ip)
         return
 
     current_username = st.session_state.get("username", "Guest")
@@ -611,6 +624,7 @@ def main():
 
     if not user_data or user_data[4] == "inactive":
         st.error("គណនីត្រូវបញ្ឈប់។")
+        clear_ip_session(client_ip)
         st.session_state["authenticated"] = False
         st.rerun()
 
@@ -631,6 +645,7 @@ def main():
             if "active_project" not in st.session_state or st.session_state["active_project"] not in projects:
                 default_p = projects[0]
                 st.session_state["active_project"] = (default_p[0], default_p[1], default_p[2])
+                st.session_state.pop("cached_df_items", None)
 
             current_p = st.session_state["active_project"]
             current_label = f"{current_p[1]} (ក្បាលដី: {current_p[2]})"
@@ -639,11 +654,18 @@ def main():
 
             selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", labels, index=idx, label_visibility="collapsed")
             active_p = proj_dict[selected_proj_label]
-            st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
+
+            if st.session_state["active_project"] != (active_p[0], active_p[1], active_p[2]):
+                st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
+                st.session_state.pop("cached_df_items", None)
+                st.rerun()
+
     with p_col3:
         if st.button("🚪 ចាកចេញ", use_container_width=True):
+            clear_ip_session(client_ip)
             st.session_state["authenticated"] = False
             st.session_state.pop("active_project", None)
+            st.session_state.pop("cached_df_items", None)
             st.rerun()
 
     if "active_project" not in st.session_state:
@@ -667,7 +689,10 @@ def main():
 
     nav_choice = st.radio("Navigation Bar", options=nav_choices, horizontal=True, label_visibility="collapsed")
 
-    df_items = get_project_items(project_id, total_items)
+    if "cached_df_items" not in st.session_state:
+        st.session_state["cached_df_items"] = load_project_items(project_id, total_items)
+
+    df_items = st.session_state["cached_df_items"]
     df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
     df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
 
@@ -716,7 +741,6 @@ def main():
             notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
         with col2:
-            # 📱 KEYBOARD FIX: st.pills PREVENTS MOBILE KEYBOARD FROM POPPING UP
             selected_conditions = st.pills("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions, selection_mode="multi")
             selected_name_errors = st.pills("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names, selection_mode="multi")
 
@@ -725,9 +749,7 @@ def main():
         with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
         with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
-        save_btn = st.button("💾 រក្សាទុកទិន្នន័យ", type="primary", use_container_width=True)
-
-        if save_btn:
+        if st.button("💾 រក្សាទុកទិន្នន័យ", use_container_width=True):
             new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
             final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
 
@@ -743,6 +765,8 @@ def main():
             formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
             update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+            
+            st.session_state.pop("cached_df_items", None)
 
             st.session_state["last_saved_summary"] = {
                 "code": str(code_to_update),
@@ -804,6 +828,7 @@ def main():
                 if st.form_submit_button("បង្កើតគម្រោង", use_container_width=True):
                     pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
                     st.session_state["active_project"] = (pid, pname, pitems)
+                    st.session_state.pop("cached_df_items", None)
                     st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
                     st.rerun()
 
@@ -816,6 +841,27 @@ def main():
                     success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
                     if success:
                         st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
+                        st.session_state.pop("cached_df_items", None)
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
+        # 🗑️ ADMIN ONLY: DELETE PROJECT SECTION
+        if is_admin:
+            st.write("---")
+            st.markdown("### 🗑️ លុបគម្រោង (សម្រាប់ Admin តែប៉ុណ្ណោះ)")
+            proj_to_del_options = {f"{p[1]} (ID: {p[0]})": p for p in projects}
+            selected_del_label = st.selectbox("ជ្រើសរើសគម្រោងដែលត្រូវលុប", list(proj_to_del_options.keys()))
+            target_proj = proj_to_del_options[selected_del_label]
+
+            with st.expander("⚠️ បញ្ជាក់ការលុបគម្រោង"):
+                st.warning(f"តើអ្នកពិតជាចង់លុបគម្រោង '{target_proj[1]}' នេះមែនទេ? ទិន្នន័យក្បាលដីទាំងអស់នឹងត្រូវលុបចោលទាំងស្រុង!")
+                if st.button("🗑️ យល់ព្រមលុបគម្រោង", type="primary", use_container_width=True):
+                    ok, msg = delete_project_by_id(target_proj[0])
+                    if ok:
+                        st.session_state.pop("active_project", None)
+                        st.session_state.pop("cached_df_items", None)
                         st.success(msg)
                         st.rerun()
                     else:
