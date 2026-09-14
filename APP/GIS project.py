@@ -445,6 +445,11 @@ def inject_custom_css():
                 border-radius: 8px !important;
             }
 
+            /* Prevent mobile keyboard popup on select inputs */
+            div[data-baseweb="select"] input {
+                inputmode: none !important;
+            }
+
             .stButton > button {
                 background: #1E293B !important;
                 color: #F8FAFC !important;
@@ -455,6 +460,23 @@ def inject_custom_css():
             .stButton > button:hover {
                 border-color: #10B981 !important;
                 color: #10B981 !important;
+            }
+
+            /* Sticky Floating Save Button */
+            div[data-testid="stForm"] {
+                position: relative;
+            }
+            div[data-testid="stForm"] button[kind="formSubmit"] {
+                position: sticky !important;
+                bottom: 1rem !important;
+                z-index: 99999 !important;
+                background: #10B981 !important;
+                color: #FFFFFF !important;
+                border-color: #059669 !important;
+                box-shadow: 0 4px 14px rgba(0,0,0,0.4) !important;
+            }
+            div[data-testid="stForm"] button[kind="formSubmit"]:hover {
+                background: #059669 !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -706,8 +728,8 @@ def main():
                 notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
 
             with col2:
-                selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions)
-                selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names)
+                selected_conditions = st.multiselect("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions, placeholder="ជ្រើសរើសលក្ខខណ្ឌ")
+                selected_name_errors = st.multiselect("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names, placeholder="ជ្រើសរើសព័ត៌មានខុសឆ្គង")
 
             curr_cambodia_dt = get_cambodia_now()
             dt_col1, dt_col2 = st.columns(2)
