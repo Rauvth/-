@@ -12,7 +12,6 @@ DEFAULT_ADMIN_USER = "Ra Vuth"
 DEFAULT_ADMIN_PASS = "12354561"
 # ==============================================================================
 
-DB_NAME = "project_manager.db"
 CAMBODIA_TZ = ZoneInfo("Asia/Phnom_Penh")
 
 CONDITION_OPTIONS = [
@@ -43,6 +42,11 @@ ERR_NAME_OPTIONS = [
 ]
 
 
+def get_db_connection():
+    """Returns a connection to the PostgreSQL database."""
+    return psycopg2.connect(st.secrets["postgres"]["url"])
+
+
 def get_cambodia_now():
     """Returns current datetime in Cambodia timezone."""
     return datetime.datetime.now(CAMBODIA_TZ)
@@ -50,8 +54,7 @@ def get_cambodia_now():
 
 def initialize_database():
     """Sets up database tables including multi-user accounts, temporary admin roles, and status management."""
-    conn = psycopg2.connect(st.secrets["postgres"]["url"])
-
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -67,15 +70,14 @@ def initialize_database():
     """)
 
     cursor.execute("""
-    SELECT column_name 
-    FROM information_schema.columns 
-    WHERE table_name = 'users'
-""")
-user_columns = [col[0] for col in cursor.fetchall()]
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'users'
+    """)
+    user_columns = [col[0] for col in cursor.fetchall()]
 
-if "temp_admin_expires" not in user_columns:
-    cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
-
+    if "temp_admin_expires" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -85,13 +87,15 @@ if "temp_admin_expires" not in user_columns:
     """)
 
     cursor.execute("""
-        INSERT OR IGNORE INTO app_settings (key, value)
+        INSERT INTO app_settings (key, value)
         VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
+        ON CONFLICT (key) DO NOTHING
     """)
 
     cursor.execute("""
-        INSERT OR IGNORE INTO users (username, password, role, status, created_at)
-        VALUES (?, ?, 'admin', 'approved', ?)
+        INSERT INTO users (username, password, role, status, created_at)
+        VALUES (%s, %s, 'admin', 'approved', %s)
+        ON CONFLICT (username) DO NOTHING
     """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
 
     cursor.execute("""
@@ -117,8 +121,12 @@ if "temp_admin_expires" not in user_columns:
         )
     """)
 
-    cursor.execute("PRAGMA table_info(items)")
-    item_columns = [col[1] for col in cursor.fetchall()]
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'items'
+    """)
+    item_columns = [col[0] for col in cursor.fetchall()]
     if "name_errors" not in item_columns:
         cursor.execute("ALTER TABLE items ADD COLUMN name_errors TEXT DEFAULT ''")
 
@@ -138,8 +146,12 @@ if "temp_admin_expires" not in user_columns:
         )
     """)
 
-    cursor.execute("PRAGMA table_info(logs)")
-    log_columns = [col[1] for col in cursor.fetchall()]
+    cursor.execute("""
+        SELECT column_name 
+        FROM information_schema.columns 
+        WHERE table_name = 'logs'
+    """)
+    log_columns = [col[0] for col in cursor.fetchall()]
     if "name_errors" not in log_columns:
         cursor.execute("ALTER TABLE logs ADD COLUMN name_errors TEXT DEFAULT ''")
 
@@ -148,7 +160,7 @@ if "temp_admin_expires" not in user_columns:
 
 
 def get_app_title():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
     row = cursor.fetchone()
@@ -157,21 +169,24 @@ def get_app_title():
 
 
 def set_app_title(new_title):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('app_title', ?)", (new_title,))
+    cursor.execute("""
+        INSERT INTO app_settings (key, value) VALUES ('app_title', %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    """, (new_title,))
     conn.commit()
     conn.close()
 
 
 def log_activity(project_id, code, action_type, status="", phone="", notes="", condition="", name_errors="", custom_timestamp=""):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     timestamp = custom_timestamp if custom_timestamp else get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
 
     cursor.execute("""
         INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (project_id, code, action_type, status, phone, notes, condition, name_errors, timestamp))
 
     conn.commit()
@@ -179,7 +194,7 @@ def log_activity(project_id, code, action_type, status="", phone="", notes="", c
 
 
 def check_and_expire_temp_admins():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
     rows = cursor.fetchall()
@@ -191,7 +206,7 @@ def check_and_expire_temp_admins():
             try:
                 expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
                 if now >= expire_dt:
-                    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = ?", (user_id,))
+                    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = %s", (user_id,))
             except ValueError:
                 pass
     conn.commit()
@@ -200,9 +215,9 @@ def check_and_expire_temp_admins():
 
 def get_user_from_db(username):
     check_and_expire_temp_admins()
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = ?",
+    cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
                    (username,))
     row = cursor.fetchone()
     conn.close()
@@ -210,25 +225,25 @@ def get_user_from_db(username):
 
 
 def register_user(username, password, requested_role):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
     try:
         cursor.execute("""
             INSERT INTO users (username, password, role, status, created_at)
-            VALUES (?, ?, ?, 'pending', ?)
+            VALUES (%s, %s, %s, 'pending', %s)
         """, (username, password, requested_role, created_at))
         conn.commit()
         conn.close()
         return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         conn.close()
         return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
 
 
 def get_all_users():
     check_and_expire_temp_admins()
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
     rows = cursor.fetchall()
@@ -237,7 +252,7 @@ def get_all_users():
 
 
 def get_all_projects():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id, name, total_items FROM projects")
     projects = cursor.fetchall()
@@ -246,16 +261,17 @@ def get_all_projects():
 
 
 def create_new_project(name, total_items):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO projects (name, total_items) VALUES (?, ?)", (name, total_items))
+        cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
+        project_id = cursor.fetchone()[0]
         conn.commit()
-        project_id = cursor.lastrowid
         log_activity(project_id, None, "បានបង្កើតគម្រោង",
                      notes=f"បានបង្កើតគម្រោង '{name}' ដែលមានក្បាលដីសរុប {total_items}")
-    except sqlite3.IntegrityError:
-        cursor.execute("SELECT id, name, total_items FROM projects WHERE name = ?", (name,))
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
         row = cursor.fetchone()
         project_id, name, total_items = row[0], row[1], row[2]
     conn.close()
@@ -263,26 +279,26 @@ def create_new_project(name, total_items):
 
 
 def update_project_details(project_id, new_name, new_total_items):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("UPDATE projects SET name = ?, total_items = ? WHERE id = ?",
+        cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
                        (new_name, new_total_items, project_id))
         conn.commit()
         conn.close()
         return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
-    except sqlite3.IntegrityError:
+    except psycopg2.IntegrityError:
         conn.close()
         return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
 def get_project_items(project_id, total_items):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
         FROM items 
-        WHERE project_id = ? 
+        WHERE project_id = %s 
         ORDER BY code ASC
     """, (project_id,))
 
@@ -299,6 +315,245 @@ def get_project_items(project_id, total_items):
                 status = "បានពិនិត្យ"
         else:
             status, updated_at, phone, notes, condition, name_errs = "មិនទាន់បានពិនិត្យ", "-", "", "", "", ""
+
+        data.append({
+            "ក្បាលដី": code,
+            "ស្ថានភាព": status,
+            "លេខទូស័ព្ទ": phone,
+            "ផ្សេងៗ": notes,
+            "លក្ខខណ្ឌ": condition if condition else "ធម្មតា",
+            "ព័ត៌មានខុសឆ្គង": name_errs if name_errs else "គ្មាន",
+            "បច្ចុប្បន្នភាពចុងក្រោយ": updated_at if updated_at else "-"
+        })
+    return pd.DataFrame(data)
+
+
+def is_no_data(row):
+    cond = str(row["លក្ខខណ្ឌ"])
+    notes = str(row["ផ្សេងៗ"])
+    return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
+
+
+def update_item_in_db(project_id, code, status, phone, notes, condition, name_errors, custom_timestamp):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM items WHERE project_id = %s AND code = %s", (project_id, code))
+    item = cursor.fetchone()
+
+    if item:
+        cursor.execute("""
+            UPDATE items SET status = %s, updated_at = %s, customer_phone = %s, notes = %s, condition = %s, name_errors = %s
+            WHERE id = %s
+        """, (status, custom_timestamp, phone, notes, condition, name_errors, item[0]))
+    else:
+        cursor.execute("""
+            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
+
+    conn.commit()
+    conn.close()
+
+    log_activity(
+        project_id=project_id,
+        code=code,
+        action_type="កែប្រែទិន្នន័យ",
+        status=status,
+        phone=phone,
+        notes=notes,
+        condition=condition,
+        name_errors=name_errors,
+        custom_timestamp=custom_timestamp
+    )
+
+
+def get_project_history(project_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
+        FROM logs 
+        WHERE project_id = %s 
+        ORDER BY id DESC
+    """, (project_id,))
+    logs = cursor.fetchall()
+    conn.close()
+
+    data = []
+    for log in logs:
+        log_status = log[3]
+        if log_status in ["Not Yet Checked", ""]:
+            log_status = "មិនទាន់បានពិនិត្យ"
+        elif log_status == "Checked":
+            log_status = "បានពិនិត្យ"
+
+        data.append({
+            "កាលបរិច្ឆេទ & ម៉ោង": log[0] if log[0] else "",
+            "ក្បាលដី": log[1] if log[1] else "",
+            "សកម្មភាព": log[2] if log[2] else "",
+            "ស្ថានភាព": log_status if log_status else "",
+            "លេខទូស័ព្ទ": log[4] if log[4] else "",
+            "ផ្សេងៗ": log[5] if log[5] else "",
+            "លក្ខខណ្ឌ": log[6] if log[6] else "ធម្មតា",
+            "ព័ត៌មានខុសឆ្គង": log[7] if log[7] else "គ្មាន"
+        })
+    return pd.DataFrame(data)
+
+
+def inject_custom_css():
+    st.markdown("""
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+            
+            /* Slate Deep Theme */
+            html, body, [class*="css"] {
+                font-family: 'Kantumruy Pro', 'Space Grotesk', sans-serif !important;
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
+            }
+            
+            .stApp {
+                background: #0F172A !important;
+            }
+
+            .slate-metric {
+                background: #1E293B;
+                border-left: 4px solid #10B981;
+                border-radius: 8px;
+                padding: 0.75rem 1rem;
+            }
+            .slate-metric-title {
+                color: #94A3B8;
+                font-size: 0.8rem;
+                font-weight: 500;
+            }
+            .slate-metric-value {
+                color: #F8FAFC;
+                font-size: 1.5rem;
+                font-weight: 700;
+            }
+
+            .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
+                border: 1px solid #334155 !important;
+                border-radius: 8px !important;
+            }
+
+            .stButton > button {
+                background: #1E293B !important;
+                color: #F8FAFC !important;
+                border: 1px solid #475569 !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+            }
+            .stButton > button:hover {
+                border-color: #10B981 !important;
+                color: #10B981 !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+
+def render_auth_page():
+    st.markdown("""
+        <div style="text-align: center; max-width: 420px; margin: 3rem auto 1rem auto;">
+            <h1 style="font-size: 1.8rem; font-weight: 700; color: #F8FAFC;">ប្រព័ន្ធគ្រប់គ្រងបិតផ្សាយ</h1>
+            <p style="color: #94A3B8; font-size: 0.9rem;">សូមចូលប្រើប្រាស់ដើម្បីបន្ត</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        mode = st.radio("ជ្រើសរើស", ["ចូលប្រើប្រាស់", "បង្កើតគណនីថ្មី"], horizontal=True, label_visibility="collapsed")
+
+        if mode == "ចូលប្រើប្រាស់":
+            role_type = st.selectbox("ប្រភេទទិន្នន័យចូល", ["អ្នកប្រើប្រាស់ធម្មតា (User)", "អែដមីន (Admin)"])
+            with st.form("login_form"):
+                username = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                password = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                login_btn = st.form_submit_button("ចូលប្រព័ន្ធ", use_container_width=True)
+
+                if login_btn:
+                    user = get_user_from_db(username)
+                    if user and user[2] == password:
+                        db_role = user[3]
+                        db_status = user[4]
+
+                        if db_status == "inactive":
+                            st.error("🔒 គណនីនេះត្រូវផ្អាក។ សូមទាក់ទង Admin។")
+                            return
+
+                        if db_status == "pending":
+                            st.session_state["pending_user"] = username
+                            st.session_state["authenticated"] = False
+                            st.rerun()
+                        elif db_status == "approved":
+                            if role_type == "អែដមីន (Admin)" and db_role not in ["admin", "temp_admin"]:
+                                st.error("គណនីនេះគ្មានសិទ្ធិជា Admin ទេ។")
+                                return
+
+                            st.session_state["authenticated"] = True
+                            st.session_state["username"] = username
+                            st.session_state["role"] = db_role
+                            st.session_state["show_startup_popup"] = True
+                            st.session_state.pop("pending_user", None)
+                            st.rerun()
+                    else:
+                        st.error("ឈ្មោះអ្នកប្រើប្រាស់ ឬពាក្យសម្ងាត់មិនត្រឹមត្រូវ។")
+
+        else:
+            requested_role = st.selectbox("ស្នើសុំនាទី", ["user", "admin"])
+            with st.form("register_form"):
+                new_user = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                new_pass = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                confirm_pass = st.text_input("បញ្ជាក់ពាក្យសម្ងាត់", type="password", placeholder="Confirm Password")
+                reg_btn = st.form_submit_button("ស្នើសុំគណនី", use_container_width=True)
+
+                if reg_btn:
+                    if not new_user or not new_pass:
+                        st.error("សូមបំពេញព័ត៌មានឱ្យគ្រប់។")
+                    elif new_pass != confirm_pass:
+                        st.error("ពាក្យសម្ងាត់ទាំងពីរមិនត្រូវគ្នាទេ!")
+                    else:
+                        success, msg = register_user(new_user, new_pass, requested_role)
+                        if success:
+                            st.session_state["pending_user"] = new_user
+                            st.rerun()
+                        else:
+                            st.error(msg)
+
+
+def render_pending_waiting_screen(username):
+    user = get_user_from_db(username)
+    if not user:
+        st.error("រកមិនឃើញគណនី។")
+        return
+
+    status = user[4]
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if status == "pending":
+            st.info(f"⏳ **រង់ចាំការអនុម័ត**\n\nសួស្តី **{username}**! គណនីរបស់អ្នកកំពុងរង់ចាំ Admin ពិនិត្យ។")
+            time.sleep(3)
+            st.rerun()
+        elif status == "approved":
+            st.success(f"🎉 **បានអនុម័តជោគជ័យ!**\n\nស្វាគមន៍ **{username}**!")
+            if st.button("ចូលទៅកាន់ Dashboard", use_container_width=True):
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.session_state["role"] = user[3]
+                st.session_state["show_startup_popup"] = True
+                st.session_state.pop("pending_user", None)
+                st.rerun()
+
+
+@st.dialog(" ")
+def show_success_dialog(summary):
+    st.markdown(f"""
+        <div style="text-align: center;">
+            <h3 style="color: #10B981; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
+       <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្ប, updated_at, phone, notes, condition, name_errs = "មិនទាន់បានពិនិត្យ", "-", "", "", "", ""
 
         data.append({
             "ក្បាលដី": code,
