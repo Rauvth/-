@@ -106,6 +106,11 @@ def initialize_database():
         )
     """)
 
+    # --- AUTO-CREATE DEFAULT PROJECT IF NONE EXISTS ---
+    cursor.execute("SELECT COUNT(*) FROM projects")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
+
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS items (
             id SERIAL PRIMARY KEY,
@@ -254,7 +259,7 @@ def get_all_users():
 def get_all_projects():
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, name, total_items FROM projects")
+    cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
     projects = cursor.fetchall()
     conn.close()
     return projects
@@ -553,7 +558,7 @@ def show_success_dialog(summary):
     st.markdown(f"""
         <div style="text-align: center;">
             <h3 style="color: #10B981; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
-       <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
+            <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
         </div>
     """, unsafe_allow_html=True)
 
@@ -608,7 +613,18 @@ def main():
     with p_col2:
         if projects:
             proj_dict = {f"{p[1]} (ក្បាលដី: {p[2]})": p for p in projects}
-            selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", list(proj_dict.keys()), label_visibility="collapsed")
+
+            # AUTO-SELECT FIRST PROJECT IF NOT SET
+            if "active_project" not in st.session_state or st.session_state["active_project"] not in projects:
+                default_p = projects[0]
+                st.session_state["active_project"] = (default_p[0], default_p[1], default_p[2])
+
+            current_p = st.session_state["active_project"]
+            current_label = f"{current_p[1]} (ក្បាលដី: {current_p[2]})"
+            labels = list(proj_dict.keys())
+            idx = labels.index(current_label) if current_label in labels else 0
+
+            selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", labels, index=idx, label_visibility="collapsed")
             active_p = proj_dict[selected_proj_label]
             st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
     with p_col3:
