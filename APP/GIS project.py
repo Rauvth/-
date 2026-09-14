@@ -2,6 +2,7 @@ import psycopg2
 from psycopg2 import pool
 import datetime
 import time
+import re
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
@@ -313,7 +314,6 @@ def update_project_details(project_id, new_name, new_total_items):
         return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
-# --- 🗑️ DELETE PROJECT FUNCTIONALITY ---
 def delete_project_by_id(project_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -400,6 +400,29 @@ def update_item_in_db(project_id, code, status, phone, notes, condition, name_er
     release_db_connection(conn)
 
 
+def parse_parcel_codes(input_str, max_limit):
+    """Parse string inputs like '1, 2, 5-10, 12' into a sorted list of integer codes."""
+    codes = set()
+    parts = input_str.split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            subparts = part.split("-")
+            if len(subparts) == 2 and subparts[0].isdigit() and subparts[1].isdigit():
+                start = int(subparts[0])
+                end = int(subparts[1])
+                for c in range(min(start, end), max(start, end) + 1):
+                    if 1 <= c <= max_limit:
+                        codes.add(c)
+        elif part.isdigit():
+            c = int(part)
+            if 1 <= c <= max_limit:
+                codes.add(c)
+    return sorted(list(codes))
+
+
 def get_project_history(project_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -443,7 +466,7 @@ def inject_custom_css():
                 background-color: #0F172A !important;
                 color: #F8FAFC !important;
             }
-            .stApp { background: #0F172A !important; }
+            .stApp { background: #0F172A !important; padding-bottom: 120px !important; }
 
             .slate-metric {
                 background: #1E293B;
@@ -470,6 +493,20 @@ def inject_custom_css():
             }
             .stButton > button:hover {
                 background: #059669 !important;
+            }
+
+            /* Floating Sticky Action Bar CSS */
+            div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) {
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                background-color: #1E293B !important;
+                border-top: 2px solid #334155 !important;
+                padding: 12px 24px !important;
+                z-index: 999999 !important;
+                box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.5) !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -601,7 +638,6 @@ def main():
 
     client_ip = get_client_ip()
 
-    # --- AUTO LOGIN USING TRACKED IP ---
     if not st.session_state.get("authenticated", False):
         saved_username = get_username_by_ip(client_ip)
         if saved_username:
@@ -721,7 +757,12 @@ def main():
     elif nav_choice == "✏️ កែប្រែទិន្នន័យក្បាលដី":
         st.subheader("✏️ កែប្រែទិន្នន័យក្បាលដី")
 
-        code_to_update = st.number_input("បញ្ចូលលេខក្បាលដី", min_value=1, max_value=total_items, step=1)
+        save_mode = st.radio("ទម្រង់នៃការរក្សាទុក", ["មួយក្បាលដី (Single)", "ច្រើនក្បាលដី (Multi-Save)"], horizontal=True)
+
+        if "edit_parcel_code" not in st.session_state:
+            st.session_state["edit_parcel_code"] = 1
+
+        code_to_update = st.session_state["edit_parcel_code"]
         current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
 
         curr_status = current_row["ស្ថានភាព"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
@@ -749,36 +790,97 @@ def main():
         with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
         with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
-        if st.button("💾 រក្សាទុកទិន្នន័យ", use_container_width=True):
-            new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
-            final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+        # ----------------------------------------------------------------------
+        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED)
+        # ----------------------------------------------------------------------
+        hover_bar = st.container()
+        target_codes = []
 
-            selected_cond_list = list(selected_conditions) if selected_conditions else []
-            if no_data_checked and "គ្មានទិន្នន័យ" not in selected_cond_list:
-                selected_cond_list.append("គ្មានទិន្នន័យ")
+        with hover_bar:
+            st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
 
-            condition_str = ", ".join(selected_cond_list) if selected_cond_list else "ធម្មតា"
-            name_err_list = list(selected_name_errors) if selected_name_errors else []
-            name_err_str = ", ".join(name_err_list) if name_err_list else "គ្មាន"
+            if save_mode == "មួយក្បាលដី (Single)":
+                b_col1, b_col2, b_col3, b_col4 = st.columns([1, 2, 1, 2])
 
-            combined_dt = datetime.datetime.combine(selected_date, selected_time)
-            formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+                with b_col1:
+                    if st.button("⬅️ ក្បាលដីមុន", use_container_width=True, disabled=(code_to_update <= 1)):
+                        st.session_state["edit_parcel_code"] = max(1, code_to_update - 1)
+                        st.rerun()
 
-            update_item_in_db(project_id, code_to_update, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
-            
-            st.session_state.pop("cached_df_items", None)
+                with b_col2:
+                    new_code = st.number_input(
+                        "ក្បាលដី #",
+                        min_value=1,
+                        max_value=total_items,
+                        value=code_to_update,
+                        key="hover_code_input",
+                        label_visibility="collapsed"
+                    )
+                    if new_code != code_to_update:
+                        st.session_state["edit_parcel_code"] = new_code
+                        st.rerun()
 
-            st.session_state["last_saved_summary"] = {
-                "code": str(code_to_update),
-                "status": new_status,
-                "phone": phone_input,
-                "notes": final_notes,
-                "condition": condition_str,
-                "name_errors": name_err_str,
-                "timestamp": formatted_dt
-            }
-            st.session_state["show_save_success_dialog"] = True
-            st.rerun()
+                with b_col3:
+                    if st.button("ក្បាលដីបន្ទាប់ ➡️", use_container_width=True, disabled=(code_to_update >= total_items)):
+                        st.session_state["edit_parcel_code"] = min(total_items, code_to_update + 1)
+                        st.rerun()
+
+                with b_col4:
+                    save_trigger = st.button("💾 រក្សាទុក", type="primary", use_container_width=True)
+                
+                target_codes = [code_to_update]
+
+            else:
+                m_col1, m_col2 = st.columns([4, 2])
+                with m_col1:
+                    multi_input_str = st.text_input(
+                        "បញ្ចូលលេខក្បាលដីច្រើន (ឧទាហរណ៍: 1, 2, 5-10, 15)",
+                        value=f"{code_to_update}",
+                        key="multi_code_input",
+                        label_visibility="collapsed",
+                        placeholder="បញ្ចូលលេខក្បាលដី (ឧទាហរណ៍: 1, 2, 5-10, 15)"
+                    )
+                    target_codes = parse_parcel_codes(multi_input_str, total_items)
+
+                with m_col2:
+                    save_trigger = st.button(f"💾 រក្សាទុក ({len(target_codes)} ក្បាលដី)", type="primary", use_container_width=True)
+
+        if save_trigger:
+            if not target_codes:
+                st.error("សូមបញ្ចូលលេខក្បាលដីត្រឹមត្រូវយ៉ាងហោចណាស់មួយ!")
+            else:
+                new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+                final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+
+                selected_cond_list = list(selected_conditions) if selected_conditions else []
+                if no_data_checked and "គ្មានទិន្នន័យ" not in selected_cond_list:
+                    selected_cond_list.append("គ្មានទិន្នន័យ")
+
+                condition_str = ", ".join(selected_cond_list) if selected_cond_list else "ធម្មតា"
+                name_err_list = list(selected_name_errors) if selected_name_errors else []
+                name_err_str = ", ".join(name_err_list) if name_err_list else "គ្មាន"
+
+                combined_dt = datetime.datetime.combine(selected_date, selected_time)
+                formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+
+                for code in target_codes:
+                    update_item_in_db(project_id, code, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+                
+                st.session_state.pop("cached_df_items", None)
+
+                display_codes = ", ".join(map(str, target_codes)) if len(target_codes) <= 5 else f"{target_codes[0]}...{target_codes[-1]} ({len(target_codes)} ក្បាលដី)"
+
+                st.session_state["last_saved_summary"] = {
+                    "code": display_codes,
+                    "status": new_status,
+                    "phone": phone_input,
+                    "notes": final_notes,
+                    "condition": condition_str,
+                    "name_errors": name_err_str,
+                    "timestamp": formatted_dt
+                }
+                st.session_state["show_save_success_dialog"] = True
+                st.rerun()
 
     elif nav_choice == "⏳ មិនទាន់បានពិនិត្យ":
         st.subheader("⏳ បញ្ជីក្បាលដីមិនទាន់បានពិនិត្យ")
@@ -847,7 +949,6 @@ def main():
                     else:
                         st.error(msg)
 
-        # 🗑️ ADMIN ONLY: DELETE PROJECT SECTION
         if is_admin:
             st.write("---")
             st.markdown("### 🗑️ លុបគម្រោង (សម្រាប់ Admin តែប៉ុណ្ណោះ)")
