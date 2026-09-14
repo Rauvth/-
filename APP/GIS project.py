@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg2
 import datetime
 import time
 from zoneinfo import ZoneInfo
@@ -50,7 +50,8 @@ def get_cambodia_now():
 
 def initialize_database():
     """Sets up database tables including multi-user accounts, temporary admin roles, and status management."""
-    conn = sqlite3.connect(DB_NAME)
+    conn = psycopg2.connect(st.secrets["postgres"]["url"])
+
     cursor = conn.cursor()
 
     cursor.execute("""
