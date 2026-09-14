@@ -73,8 +73,9 @@ def initialize_database():
 """)
 user_columns = [col[0] for col in cursor.fetchall()]
 
-    if "temp_admin_expires" not in user_columns:
-        cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
+if "temp_admin_expires" not in user_columns:
+    cursor.execute("ALTER TABLE users ADD COLUMN temp_admin_expires TEXT DEFAULT ''")
+
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS app_settings (
