@@ -6,7 +6,6 @@ import re
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
-from contextlib import contextmanager
 
 # ==============================================================================
 # 🔐 SYSTEM DEFAULT ADMIN (PROTECTED ROOT ADMIN)
@@ -45,21 +44,19 @@ ERR_NAME_OPTIONS = [
 ]
 
 
-# --- 🚀 SAFE CONNECTION POOLING ---
+# --- 🚀 CONNECTION POOLING ---
 @st.cache_resource
 def init_db_pool():
-    # Fixed connection pool unpacking for Streamlit secrets
-    return psycopg2.pool.SimpleConnectionPool(1, 20, **st.secrets["postgres"])
+    # FIX: Unpack the dictionary parameters from st.secrets["postgres"]
+    return psycopg2.pool.SimpleConnectionPool(1, 10, **st.secrets["postgres"])
 
-@contextmanager
-def get_db():
-    """Context manager that guarantees connections return to pool even on exception."""
-    pool_obj = init_db_pool()
-    conn = pool_obj.getconn()
-    try:
-        yield conn
-    finally:
-        pool_obj.putconn(conn)
+
+def get_db_connection():
+    return init_db_pool().getconn()
+
+
+def release_db_connection(conn):
+    init_db_pool().putconn(conn)
 
 
 def get_cambodia_now():
@@ -78,254 +75,275 @@ def get_client_ip():
 
 
 def initialize_database():
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    username TEXT UNIQUE NOT NULL,
-                    password TEXT NOT NULL,
-                    role TEXT NOT NULL DEFAULT 'user',
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TEXT DEFAULT '',
-                    temp_admin_expires TEXT DEFAULT ''
-                )
-            """)
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS user_sessions (
-                    ip_address TEXT PRIMARY KEY,
-                    username TEXT NOT NULL,
-                    login_time TEXT NOT NULL
-                )
-            """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT DEFAULT '',
+            temp_admin_expires TEXT DEFAULT ''
+        )
+    """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS app_settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT
-                )
-            """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_sessions (
+            ip_address TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            login_time TEXT NOT NULL
+        )
+    """)
 
-            cursor.execute("""
-                INSERT INTO app_settings (key, value)
-                VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
-                ON CONFLICT (key) DO NOTHING
-            """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
 
-            cursor.execute("""
-                INSERT INTO users (username, password, role, status, created_at)
-                VALUES (%s, %s, 'admin', 'approved', %s)
-                ON CONFLICT (username) DO NOTHING
-            """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
+    cursor.execute("""
+        INSERT INTO app_settings (key, value)
+        VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
+        ON CONFLICT (key) DO NOTHING
+    """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS projects (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT UNIQUE NOT NULL,
-                    total_items INTEGER NOT NULL
-                )
-            """)
+    cursor.execute("""
+        INSERT INTO users (username, password, role, status, created_at)
+        VALUES (%s, %s, 'admin', 'approved', %s)
+        ON CONFLICT (username) DO NOTHING
+    """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
 
-            cursor.execute("SELECT COUNT(*) FROM projects")
-            if cursor.fetchone()[0] == 0:
-                cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS projects (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            total_items INTEGER NOT NULL
+        )
+    """)
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS items (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-                    code INTEGER,
-                    status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
-                    updated_at TEXT DEFAULT '',
-                    customer_phone TEXT DEFAULT '',
-                    notes TEXT DEFAULT '',
-                    condition TEXT DEFAULT '',
-                    name_errors TEXT DEFAULT ''
-                )
-            """)
+    cursor.execute("SELECT COUNT(*) FROM projects")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
 
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS logs (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-                    code INTEGER,
-                    action_type TEXT,
-                    status TEXT DEFAULT '',
-                    customer_phone TEXT DEFAULT '',
-                    notes TEXT DEFAULT '',
-                    condition TEXT DEFAULT '',
-                    name_errors TEXT DEFAULT '',
-                    timestamp TEXT
-                )
-            """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS items (
+            id SERIAL PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+            code INTEGER,
+            status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
+            updated_at TEXT DEFAULT '',
+            customer_phone TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            condition TEXT DEFAULT '',
+            name_errors TEXT DEFAULT ''
+        )
+    """)
 
-            conn.commit()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id SERIAL PRIMARY KEY,
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+            code INTEGER,
+            action_type TEXT,
+            status TEXT DEFAULT '',
+            customer_phone TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            condition TEXT DEFAULT '',
+            name_errors TEXT DEFAULT '',
+            timestamp TEXT
+        )
+    """)
+
+    conn.commit()
+    release_db_connection(conn)
 
 
 # --- 🌐 IP SESSION MANAGEMENT ---
 def register_ip_session(ip, username):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-            cursor.execute("""
-                INSERT INTO user_sessions (ip_address, username, login_time)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (ip_address) DO UPDATE SET username = EXCLUDED.username, login_time = EXCLUDED.login_time
-            """, (ip, username, now_str))
-            conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+    cursor.execute("""
+        INSERT INTO user_sessions (ip_address, username, login_time)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (ip_address) DO UPDATE SET username = EXCLUDED.username, login_time = EXCLUDED.login_time
+    """, (ip, username, now_str))
+    conn.commit()
+    release_db_connection(conn)
 
 
 def get_username_by_ip(ip):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT username FROM user_sessions WHERE ip_address = %s", (ip,))
-            row = cursor.fetchone()
-            return row[0] if row else None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT username FROM user_sessions WHERE ip_address = %s", (ip,))
+    row = cursor.fetchone()
+    release_db_connection(conn)
+    return row[0] if row else None
 
 
 def clear_ip_session(ip):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("DELETE FROM user_sessions WHERE ip_address = %s", (ip,))
-            conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM user_sessions WHERE ip_address = %s", (ip,))
+    conn.commit()
+    release_db_connection(conn)
 
 
 @st.cache_data(ttl=300)
 def get_app_title():
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
-            row = cursor.fetchone()
-            return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
+    row = cursor.fetchone()
+    release_db_connection(conn)
+    return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
 
 
 def set_app_title(new_title):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO app_settings (key, value) VALUES (%s, %s)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """, ('app_title', new_title))
-            conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO app_settings (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    """, ('app_title', new_title))
+    conn.commit()
+    release_db_connection(conn)
     st.cache_data.clear()
 
 
 def check_and_expire_temp_admins():
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
-            rows = cursor.fetchall()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
+    rows = cursor.fetchall()
 
-            now = get_cambodia_now()
-            for row in rows:
-                user_id, username, expire_str = row
-                if expire_str:
-                    try:
-                        expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
-                        if now >= expire_dt:
-                            cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = %s", (user_id,))
-                    except ValueError:
-                        pass
-            conn.commit()
+    now = get_cambodia_now()
+    for row in rows:
+        user_id, username, expire_str = row
+        if expire_str:
+            try:
+                expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
+                if now >= expire_dt:
+                    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = %s", (user_id,))
+            except ValueError:
+                pass
+    conn.commit()
+    release_db_connection(conn)
 
 
 def get_user_from_db(username):
     check_and_expire_temp_admins()
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
-                           (username,))
-            return cursor.fetchone()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
+                   (username,))
+    row = cursor.fetchone()
+    release_db_connection(conn)
+    return row
 
 
 def register_user(username, password, requested_role):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-            try:
-                cursor.execute("""
-                    INSERT INTO users (username, password, role, status, created_at)
-                    VALUES (%s, %s, %s, 'pending', %s)
-                """, (username, password, requested_role, created_at))
-                conn.commit()
-                return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
-            except psycopg2.IntegrityError:
-                return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+    try:
+        cursor.execute("""
+            INSERT INTO users (username, password, role, status, created_at)
+            VALUES (%s, %s, %s, 'pending', %s)
+        """, (username, password, requested_role, created_at))
+        conn.commit()
+        release_db_connection(conn)
+        return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
+    except psycopg2.IntegrityError:
+        release_db_connection(conn)
+        return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
 
 
 def get_all_users():
     check_and_expire_temp_admins()
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
-            rows = cursor.fetchall()
-            return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
+    rows = cursor.fetchall()
+    release_db_connection(conn)
+    return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
 
 
 @st.cache_data(ttl=60)
 def get_all_projects():
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
-            return cursor.fetchall()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
+    projects = cursor.fetchall()
+    release_db_connection(conn)
+    return projects
 
 
 def create_new_project(name, total_items):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
-                project_id = cursor.fetchone()[0]
-                conn.commit()
-            except psycopg2.IntegrityError:
-                conn.rollback()
-                cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
-                row = cursor.fetchone()
-                project_id, name, total_items = row[0], row[1], row[2]
-            st.cache_data.clear()
-            return project_id, name, total_items
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
+        project_id = cursor.fetchone()[0]
+        conn.commit()
+    except psycopg2.IntegrityError:
+        conn.rollback()
+        cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
+        row = cursor.fetchone()
+        project_id, name, total_items = row[0], row[1], row[2]
+    release_db_connection(conn)
+    st.cache_data.clear()
+    return project_id, name, total_items
 
 
 def update_project_details(project_id, new_name, new_total_items):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
-                               (new_name, new_total_items, project_id))
-                conn.commit()
-                st.cache_data.clear()
-                return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
-            except psycopg2.IntegrityError:
-                return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
+                       (new_name, new_total_items, project_id))
+        conn.commit()
+        release_db_connection(conn)
+        st.cache_data.clear()
+        return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
+    except psycopg2.IntegrityError:
+        release_db_connection(conn)
+        return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
 def delete_project_by_id(project_id):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            try:
-                cursor.execute("DELETE FROM items WHERE project_id = %s", (project_id,))
-                cursor.execute("DELETE FROM logs WHERE project_id = %s", (project_id,))
-                cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
-                conn.commit()
-                st.cache_data.clear()
-                return True, "បានលុបគម្រោងជោគជ័យ!"
-            except Exception as e:
-                conn.rollback()
-                return False, f"កំហុសក្នុងការលុបគម្រោង: {str(e)}"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("DELETE FROM items WHERE project_id = %s", (project_id,))
+        cursor.execute("DELETE FROM logs WHERE project_id = %s", (project_id,))
+        cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+        conn.commit()
+        release_db_connection(conn)
+        st.cache_data.clear()
+        return True, "បានលុបគម្រោងជោគជ័យ!"
+    except Exception as e:
+        conn.rollback()
+        release_db_connection(conn)
+        return False, f"កំហុសក្នុងការលុបគម្រោង: {str(e)}"
 
 
 def load_project_items(project_id, total_items):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
-                FROM items 
-                WHERE project_id = %s 
-                ORDER BY code ASC
-            """, (project_id,))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
+        FROM items 
+        WHERE project_id = %s 
+        ORDER BY code ASC
+    """, (project_id,))
 
-            existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
+    existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
+    release_db_connection(conn)
 
     data = []
     for code in range(1, total_items + 1):
@@ -352,449 +370,608 @@ def load_project_items(project_id, total_items):
 
 def is_no_data(row):
     cond = str(row["លក្ខខណ្ឌ"])
-    notes = str(row["ផ្សេងៗ"]).strip()
-    return cond == "គ្មានទិន្នន័យ" or "គ្មានទិន្នន័យ" in notes
+    notes = str(row["ផ្សេងៗ"])
+    return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
 
 
-def update_parcel_status(project_id, code, new_status, phone, notes, condition, name_errors):
-    now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-    phone = str(phone).strip() if phone else ""
-    notes = str(notes).strip() if notes else ""
-    condition = str(condition).strip() if condition else ""
+def update_item_in_db(project_id, code, status, phone, notes, condition, name_errors, custom_timestamp):
+    conn = get_db_connection()
+    cursor = conn.cursor()
 
-    if isinstance(name_errors, list):
-        name_errors = ", ".join(name_errors)
+    cursor.execute("SELECT id FROM items WHERE project_id = %s AND code = %s", (project_id, code))
+    item = cursor.fetchone()
+
+    if item:
+        cursor.execute("""
+            UPDATE items SET status = %s, updated_at = %s, customer_phone = %s, notes = %s, condition = %s, name_errors = %s
+            WHERE id = %s
+        """, (status, custom_timestamp, phone, notes, condition, name_errors, item[0]))
     else:
-        name_errors = str(name_errors).strip() if name_errors else ""
+        cursor.execute("""
+            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
 
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO NOTHING
-            """, (project_id, code, new_status, now_str, phone, notes, condition, name_errors))
+    cursor.execute("""
+        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+    """, (project_id, code, "កែប្រែទិន្នន័យ", status, phone, notes, condition, name_errors, custom_timestamp))
 
-            cursor.execute("""
-                UPDATE items 
-                SET status = %s, updated_at = %s, customer_phone = %s, notes = %s, condition = %s, name_errors = %s 
-                WHERE project_id = %s AND code = %s
-            """, (new_status, now_str, phone, notes, condition, name_errors, project_id, code))
-
-            cursor.execute("""
-                INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (project_id, code, 'កែប្រែ', new_status, phone, notes, condition, name_errors, now_str))
-
-            conn.commit()
+    conn.commit()
+    release_db_connection(conn)
 
 
-def get_logs_for_project(project_id):
-    with get_db() as conn:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT code, action_type, status, customer_phone, notes, condition, name_errors, timestamp
-                FROM logs
-                WHERE project_id = %s
-                ORDER BY id DESC
-            """, (project_id,))
-            rows = cursor.fetchall()
-            return pd.DataFrame(rows, columns=["ក្បាលដី", "សកម្មភាព", "ស្ថានភាព", "លេខទូស័ព្ទ", "ផ្សេងៗ",
-                                              "លក្ខខណ្ឌ", "ព័ត៌មានខុសឆ្គង", "ពេលវេលា"])
+def parse_parcel_codes(input_str, max_limit):
+    """Parse string inputs like '1, 2, 5-10, 12' into a sorted list of integer codes."""
+    codes = set()
+    parts = input_str.split(",")
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            subparts = part.split("-")
+            if len(subparts) == 2 and subparts[0].isdigit() and subparts[1].isdigit():
+                start = int(subparts[0])
+                end = int(subparts[1])
+                for c in range(min(start, end), max(start, end) + 1):
+                    if 1 <= c <= max_limit:
+                        codes.add(c)
+        elif part.isdigit():
+            c = int(part)
+            if 1 <= c <= max_limit:
+                codes.add(c)
+    return sorted(list(codes))
 
 
-def build_status_and_note(input_str):
-    raw = input_str.strip()
-    if not raw:
-        return "មិនទាន់បានពិនិត្យ", "", "", [], "ធម្មតា"
+def get_project_history(project_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
+        FROM logs 
+        WHERE project_id = %s 
+        ORDER BY id DESC LIMIT 200
+    """, (project_id,))
+    logs = cursor.fetchall()
+    release_db_connection(conn)
 
-    name_errs = []
-    condition = "ធម្មតា"
+    data = []
+    for log in logs:
+        log_status = log[3]
+        if log_status in ["Not Yet Checked", ""]:
+            log_status = "មិនទាន់បានពិនិត្យ"
+        elif log_status == "Checked":
+            log_status = "បានពិនិត្យ"
 
-    if re.search(r'(?:no|គ្មានទិន្នន័យ|គ្មានក្បាលដី|គ្មាន)', raw, re.IGNORECASE):
-        condition = "គ្មានទិន្នន័យ"
-
-    if re.search(r'(?:ទំនាស់|ទាស់|ជម្លោះ)', raw, re.IGNORECASE):
-        condition = "ទំនាស់"
-
-    found_errs = []
-    for opt in ERR_NAME_OPTIONS:
-        if opt in raw:
-            found_errs.append(opt)
-
-    if found_errs:
-        name_errs = found_errs
-        if condition == "ធម្មតា":
-            condition = "ខុសអក្ខរវិរុទ្ខ"
-
-    phone_match = re.search(r'(?:0\d{8,9}|\+855\d{8,9})', raw)
-    phone_found = phone_match.group(0) if phone_match else ""
-
-    return "បានពិនិត្យ", phone_found, raw, name_errs, condition
+        data.append({
+            "កាលបរិច្ឆេទ & ម៉ោង": log[0] if log[0] else "",
+            "ក្បាលដី": log[1] if log[1] else "",
+            "សកម្មភាព": log[2] if log[2] else "",
+            "ស្ថានភាព": log_status if log_status else "",
+            "លេខទូស័ព្ទ": log[4] if log[4] else "",
+            "ផ្សេងៗ": log[5] if log[5] else "",
+            "លក្ខខណ្ឌ": log[6] if log[6] else "ធម្មតា",
+            "ព័ត៌មានខុសឆ្គង": log[7] if log[7] else "គ្មាន"
+        })
+    return pd.DataFrame(data)
 
 
-# --- MAIN ENTRY POINT ---
-def main():
-    st.set_page_config(page_title="ប្រព័ន្ធគ្រប់គ្រងដីធ្លី", page_icon="📦", layout="wide")
-
+def inject_custom_css():
     st.markdown("""
-        <style, lang="css">
-        .stButton button {
-            width: 100%;
-            border-radius: 8px;
-            font-weight: bold;
-        }
-        .main .block-container {
-            padding-top: 2rem;
-            padding-bottom: 5rem;
-        }
+        <style>
+            @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&display=swap');
+            
+            html, body, [class*="css"] {
+                font-family: 'Kantumruy Pro', sans-serif !important;
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
+            }
+            .stApp { background: #0F172A !important; padding-bottom: 120px !important; }
 
-        .sticky-save-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background-color: #ffffff;
-            box-shadow: 0px -4px 12px rgba(0,0,0,0.15);
-            padding: 12px 24px;
-            z-index: 999999;
-            border-top: 2px solid #007bff;
-        }
+            .slate-metric {
+                background: #1E293B;
+                border-left: 4px solid #10B981;
+                border-radius: 8px;
+                padding: 0.75rem 1rem;
+            }
+            .slate-metric-title { color: #94A3B8; font-size: 0.8rem; font-weight: 500; }
+            .slate-metric-value { color: #F8FAFC; font-size: 1.5rem; font-weight: 700; }
+
+            .stTextInput input, .stNumberInput input, .stTextArea textarea, div[data-baseweb="select"] > div {
+                background-color: #0F172A !important;
+                color: #F8FAFC !important;
+                border: 1px solid #334155 !important;
+                border-radius: 8px !important;
+            }
+
+            .stButton > button {
+                background: #10B981 !important;
+                color: #FFFFFF !important;
+                border: 1px solid #059669 !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+            }
+            .stButton > button:hover {
+                background: #059669 !important;
+            }
+
+            /* Floating Sticky Action Bar CSS */
+            div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) {
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100% !important;
+                background-color: #1E293B !important;
+                border-top: 2px solid #334155 !important;
+                padding: 12px 24px !important;
+                z-index: 999999 !important;
+                box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.5) !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
-    initialize_database()
 
-    current_ip = get_client_ip()
+def render_auth_page(client_ip):
+    st.markdown("""
+        <div style="text-align: center; max-width: 420px; margin: 3rem auto 1rem auto;">
+            <h1 style="font-size: 1.8rem; font-weight: 700; color: #F8FAFC;">ប្រព័ន្ធគ្រប់គ្រងបិតផ្សាយ</h1>
+            <p style="color: #94A3B8; font-size: 0.9rem;">សូមចូលប្រើប្រាស់ដើម្បីបន្ត</p>
+        </div>
+    """, unsafe_allow_html=True)
 
-    if "user_authenticated" not in st.session_state:
-        st.session_state["user_authenticated"] = False
-        st.session_state["username"] = ""
-        st.session_state["role"] = ""
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        mode = st.radio("ជ្រើសរើស", ["ចូលប្រើប្រាស់", "បង្កើតគណនីថ្មី"], horizontal=True, label_visibility="collapsed")
 
-    if not st.session_state["user_authenticated"]:
-        active_user = get_username_by_ip(current_ip)
-        if active_user:
-            user_data = get_user_from_db(active_user)
-            if user_data and user_data[4] == "approved":
-                st.session_state["user_authenticated"] = True
-                st.session_state["username"] = user_data[1]
-                st.session_state["role"] = user_data[3]
+        if mode == "ចូលប្រើប្រាស់":
+            role_type = st.selectbox("ប្រភេទទិន្នន័យចូល", ["អ្នកប្រើប្រាស់ធម្មតា (User)", "អែដមីន (Admin)"])
+            with st.form("login_form"):
+                username = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                password = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                login_btn = st.form_submit_button("ចូលប្រព័ន្ធ", use_container_width=True)
 
-    if not st.session_state["user_authenticated"]:
-        st.title(get_app_title())
-        tab_login, tab_reg = st.tabs(["🔑 ចូលប្រព័ន្ធ (Login)", "📝 ចុះឈ្មោះ (Register)"])
+                if login_btn:
+                    user = get_user_from_db(username)
+                    if user and user[2] == password:
+                        db_role = user[3]
+                        db_status = user[4]
 
-        with tab_login:
-            st.subheader("ចូលប្រព័ន្ធ")
-            login_user = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់")
-            login_pass = st.text_input("ពាក្យសម្ងាត់", type="password")
+                        if db_status == "inactive":
+                            st.error("🔒 គណនីនេះត្រូវផ្អាក។ សូមទាក់ទង Admin។")
+                            return
 
-            if st.button("ចូលប្រព័ន្ធ", use_container_width=True, type="primary"):
-                user_data = get_user_from_db(login_user)
-                if user_data:
-                    u_id, u_name, u_pass, u_role, u_status, u_expires = user_data
-                    if u_pass == login_pass:
-                        if u_status == "approved":
-                            register_ip_session(current_ip, u_name)
-                            st.session_state["user_authenticated"] = True
-                            st.session_state["username"] = u_name
-                            st.session_state["role"] = u_role
-                            st.success("ចូលប្រព័ន្ធជោគជ័យ!")
+                        if db_status == "pending":
+                            st.session_state["pending_user"] = username
+                            st.session_state["authenticated"] = False
                             st.rerun()
-                        else:
-                            st.warning("គណនីរបស់អ្នកមិនទាន់បានអនុម័តដោយ Admin ទេ។")
+                        elif db_status == "approved":
+                            if role_type == "អែដមីន (Admin)" and db_role not in ["admin", "temp_admin"]:
+                                st.error("គណនីនេះគ្មានសិទ្ធិជា Admin ទេ។")
+                                return
+
+                            register_ip_session(client_ip, username)
+                            st.session_state["authenticated"] = True
+                            st.session_state["username"] = username
+                            st.session_state["role"] = db_role
+                            st.session_state.pop("pending_user", None)
+                            st.rerun()
                     else:
-                        st.error("ពាក្យសម្ងាត់មិនត្រឹមត្រូវ។")
-                else:
-                    st.error("រកមិនឃើញឈ្មោះអ្នកប្រើប្រាស់នេះទេ។")
-
-        with tab_reg:
-            st.subheader("ស្នើសុំបង្កើតគណនីថ្មី")
-            reg_user = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់ថ្មី")
-            reg_pass = st.text_input("ពាក្យសម្ងាត់ថ្មី", type="password")
-            reg_role = st.selectbox("ស្នើសុំតួនាទី", ["user", "temp_admin"])
-
-            if st.button("បញ្ជូនសំណើ", use_container_width=True):
-                if reg_user and reg_pass:
-                    ok, msg = register_user(reg_user, reg_pass, reg_role)
-                    if ok:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
-                else:
-                    st.warning("សូមបំពេញព័ត៌មានឱ្យបានគ្រប់គ្រាន់។")
-        return
-
-    # --- LOGGED IN USER INTERFACE ---
-    current_username = st.session_state["username"]
-    current_role = st.session_state["role"]
-
-    with st.sidebar:
-        st.title("👤 គណនី")
-        st.write(f"**អ្នកប្រើប្រាស់:** `{current_username}`")
-        st.write(f"**តួនាទី:** `{current_role}`")
-
-        if st.button("ចាកចេញពីប្រព័ន្ធ (Logout)", use_container_width=True):
-            clear_ip_session(current_ip)
-            st.session_state["user_authenticated"] = False
-            st.session_state["username"] = ""
-            st.session_state["role"] = ""
-            st.rerun()
-
-        st.divider()
-
-        if current_role in ["admin", "temp_admin"]:
-            st.subheader("⚙️ ការកំណត់ប្រព័ន្ធ (System Settings)")
-
-            with st.expander("✏️ កែប្រែចំណងជើងកម្មវិធី (App Title)"):
-                new_app_title = st.text_input("ចំណងជើងថ្មី", value=get_app_title())
-                if st.button("រក្សាទុកចំណងជើង"):
-                    set_app_title(new_app_title)
-                    st.success("បានធ្វើបច្ចុប្បន្នភាពចំណងជើង!")
-                    st.rerun()
-
-            with st.expander("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Users)"):
-                users_df = get_all_users()
-                st.dataframe(users_df, use_container_width=True)
-
-                selected_user = st.selectbox("ជ្រើសរើសអ្នកប្រើប្រាស់", users_df["ឈ្មោះអ្នកប្រើប្រាស់"].tolist())
-
-                if selected_user != DEFAULT_ADMIN_USER:
-                    action = st.selectbox("សកម្មភាព", ["អនុម័ត (Approve)", "កំណត់ជា User", "កំណត់ជា Temp Admin",
-                                                      "កំណត់ជា Admin", "លុបអ្នកប្រើប្រាស់ (Delete)"])
-
-                    duration = 0
-                    if action == "កំណត់ជា Temp Admin":
-                        duration = st.number_input("រយៈពេលជា Admin បណ្តោះអាសន្ន (នាទី)", min_value=1,
-                                                   value=60)
-
-                    if st.button("អនុវត្តសកម្មភាព"):
-                        with get_db() as conn:
-                            with conn.cursor() as cursor:
-                                if action == "អនុម័ត (Approve)":
-                                    cursor.execute("UPDATE users SET status = 'approved' WHERE username = %s",
-                                                   (selected_user,))
-                                elif action == "កំណត់ជា User":
-                                    cursor.execute(
-                                        "UPDATE users SET role = 'user', temp_admin_expires = '' WHERE username = %s",
-                                        (selected_user,))
-                                elif action == "កំណត់ជា Admin":
-                                    cursor.execute(
-                                        "UPDATE users SET role = 'admin', status = 'approved', temp_admin_expires = '' WHERE username = %s",
-                                        (selected_user,))
-                                elif action == "កំណត់ជា Temp Admin":
-                                    exp_time = get_cambodia_now() + datetime.timedelta(minutes=duration)
-                                    exp_str = exp_time.strftime("%Y-%m-%d %H:%M:%S")
-                                    cursor.execute(
-                                        "UPDATE users SET role = 'temp_admin', status = 'approved', temp_admin_expires = %s WHERE username = %s",
-                                        (exp_str, selected_user))
-                                elif action == "លុបអ្នកប្រើប្រាស់ (Delete)":
-                                    cursor.execute("DELETE FROM users WHERE username = %s", (selected_user,))
-                                conn.commit()
-                        st.success("បានអនុវត្តជោគជ័យ!")
-                        st.rerun()
-                else:
-                    st.info("Root Admin ត្រូវបានការពារ ហើយមិនអាចកែប្រែបានឡើយ។")
-
-    st.title(get_app_title())
-
-    projects = get_all_projects()
-    project_options = {p[1]: (p[0], p[2]) for p in projects}
-
-    col_proj_sel, col_proj_manage = st.columns([3, 1])
-
-    with col_proj_sel:
-        selected_project_name = st.selectbox("📁 ជ្រើសរើសគម្រោង:", list(project_options.keys()))
-        selected_project_id, total_items = project_options[selected_project_name]
-
-    with col_proj_manage:
-        if current_role in ["admin", "temp_admin"]:
-            with st.popover("➕ បង្កើត / កែប្រែគម្រោង"):
-                tab_add, tab_edit, tab_del = st.tabs(["បន្ថែម", "កែប្រែ", "លុប"])
-
-                with tab_add:
-                    p_name = st.text_input("ឈ្មោះគម្រោងថ្មី")
-                    p_items = st.number_input("ចំនួនក្បាលដីសរុប", min_value=1, value=100)
-                    if st.button("បង្កើតគម្រោង", use_container_width=True):
-                        if p_name:
-                            create_new_project(p_name, p_items)
-                            st.success("បានបង្កើតគម្រោងថ្មី!")
-                            st.rerun()
-
-                with tab_edit:
-                    ep_name = st.text_input("ឈ្មោះគម្រោងថ្មី", value=selected_project_name)
-                    ep_items = st.number_input("ចំនួនក្បាលដីថ្មី", min_value=1, value=total_items)
-                    if st.button("កែប្រែគម្រោង", use_container_width=True):
-                        ok, msg = update_project_details(selected_project_id, ep_name, ep_items)
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-                with tab_del:
-                    st.warning("⚠️ ប្រយ័ត្ន! ការលុបគម្រោងនឹងលុបជិន្នន័យក្បាលដី និងប្រវត្តិទាំងអស់។")
-                    if st.button("លុបគម្រោងនេះចោល", use_container_width=True, type="primary"):
-                        ok, msg = delete_project_by_id(selected_project_id)
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
-
-    df_items = load_project_items(selected_project_id, total_items)
-
-    st.markdown("---")
-
-    tab_input, tab_data, tab_summary, tab_history = st.tabs([
-        "📝 វាយបញ្ចូលទិន្នន័យ",
-        "📊 បញ្ជីក្បាលដី",
-        "📈 សង្ខេបរបាយការណ៍",
-        "📜 ប្រវត្តិសកម្មភាព"
-    ])
-
-    with tab_input:
-        st.subheader("បញ្ចូលទិន្នន័យក្បាលដី")
-
-        input_mode = st.radio("ទម្រង់នៃការបញ្ចូល:", ["ក្បាលដីទោល (Single Parcel)", "បញ្ចូលច្រើនក្នុងពេលតែមួយ (Batch Input)"],
-                              horizontal=True)
-
-        if input_mode == "ក្បាលដីទោល (Single Parcel)":
-
-            if "single_code" not in st.session_state:
-                st.session_state["single_code"] = 1
-
-            col_select, col_info = st.columns([1, 2])
-
-            with col_select:
-                selected_code = st.number_input("ជ្រើសរើសលេខក្បាលដី", min_value=1, max_value=total_items,
-                                                value=st.session_state["single_code"], key="single_code_input")
-                st.session_state["single_code"] = selected_code
-
-            current_row = df_items[df_items["ក្បាលដី"] == selected_code].iloc[0]
-
-            with col_info:
-                st.info(
-                    f"**ក្បាលដីទី {selected_code}** | ស្ថានភាពបច្ចុប្បន្ន: `{current_row['ស្ថានភាព']}` | បច្ចុប្បន្នភាព: `{current_row['បច្ចុប្បន្នភាពចុងក្រោយ']}`")
-
-            # Load default values
-            cur_status = current_row["ស្ថានភាព"]
-            cur_phone = current_row["លេខទូស័ព្ទ"]
-            cur_notes = current_row["ផ្សេងៗ"]
-            cur_condition = current_row["លក្ខខណ្ឌ"]
-            cur_errs = current_row["ព័ត៌មានខុសឆ្គង"]
-
-            parsed_errs = [e.strip() for e in cur_errs.split(",") if e.strip() in ERR_NAME_OPTIONS] if cur_errs else []
-
-            st.markdown("---")
-
-            col_f1, col_f2 = st.columns(2)
-
-            with col_f1:
-                status_radio = st.radio("ស្ថានភាព", ["មិនទាន់បានពិនិត្យ", "បានពិនិត្យ"],
-                                        index=0 if cur_status == "មិនទាន់បានពិនិត្យ" else 1)
-                condition_sel = st.selectbox("លក្ខខណ្ឌដី/ប្រព័ន្ធ", CONDITION_OPTIONS,
-                                             index=CONDITION_OPTIONS.index(
-                                                 cur_condition) if cur_condition in CONDITION_OPTIONS else 0)
-                phone_in = st.text_input("លេខទូស័ព្ទទំនាក់ទំនង", value=cur_phone)
-
-            with col_f2:
-                err_multisel = st.multiselect("ព័ត៌មានខុសឆ្គង (ប្រសិនបើមាន)", ERR_NAME_OPTIONS, default=parsed_errs)
-                notes_in = st.text_area("ផ្សេងៗ / កំណត់ចំណាំ", value=cur_notes)
-
-            def do_save():
-                update_parcel_status(
-                    selected_project_id,
-                    selected_code,
-                    status_radio,
-                    phone_in,
-                    notes_in,
-                    condition_sel,
-                    err_multisel
-                )
-                st.toast(f"✅ បានរក្សាទុកក្បាលដី {selected_code} រួចរាល់!", icon="🎉")
-                time.sleep(0.3)
-
-            # FLOATING BAR AT BOTTOM WITH SAVE BUTTON ONLY
-            st.markdown("""
-                <div class="sticky-save-bar">
-                    <div id="sticky-bar-content"></div>
-                </div>
-            """, unsafe_allow_html=True)
-
-            if st.button("💾 រក្សាទុក (Save)", type="primary", use_container_width=True):
-                do_save()
-                st.rerun()
+                        st.error("ឈ្មោះអ្នកប្រើប្រាស់ ឬពាក្យសម្ងាត់មិនត្រឹមត្រូវ។")
 
         else:
-            st.subheader("បញ្ចូលទិន្នន័យច្រើនក្នុងពេលតែមួយ (Batch Input)")
-            st.caption(
-                "ឧទាហរណ៍ទម្រង់បញ្ចូល: `1=បានពិនិត្យ 012345678 ខុសឈ្មោះប្ដី` ឬ `2=គ្មានទិន្នន័យ` (មួយជួរសម្រាប់មួយក្បាលដី)")
+            requested_role = st.selectbox("ស្នើសុំនាទី", ["user", "admin"])
+            with st.form("register_form"):
+                new_user = st.text_input("ឈ្មោះអ្នកប្រើប្រាស់", placeholder="Username")
+                new_pass = st.text_input("ពាក្យសម្ងាត់", type="password", placeholder="Password")
+                confirm_pass = st.text_input("បញ្ជាក់ពាក្យសម្ងាត់", type="password", placeholder="Confirm Password")
+                reg_btn = st.form_submit_button("ស្នើសុំគណនី", use_container_width=True)
 
-            batch_text = st.text_area("វាយបញ្ចូលអត្ថបទទីនេះ", height=200)
+                if reg_btn:
+                    if not new_user or not new_pass:
+                        st.error("សូមបំពេញព័ត៌មានឱ្យគ្រប់។")
+                    elif new_pass != confirm_pass:
+                        st.error("ពាក្យសម្ងាត់ទាំងពីរមិនត្រូវគ្នាទេ!")
+                    else:
+                        success, msg = register_user(new_user, new_pass, requested_role)
+                        if success:
+                            st.session_state["pending_user"] = new_user
+                            st.rerun()
+                        else:
+                            st.error(msg)
 
-            if st.button("🚀 ដំណើរការរក្សាទុកទិន្នន័យច្រើន", type="primary"):
-                if batch_text.strip():
-                    lines = batch_text.strip().split("\n")
-                    success_count = 0
-                    for line in lines:
-                        if "=" in line:
-                            parts = line.split("=", 1)
-                            try:
-                                code_p = int(parts[0].strip())
-                                val_p = parts[1].strip()
 
-                                if 1 <= code_p <= total_items:
-                                    st_val, ph_val, nt_val, err_val, cond_val = build_status_and_note(val_p)
-                                    update_parcel_status(selected_project_id, code_p, st_val, ph_val, nt_val, cond_val,
-                                                         err_val)
-                                    success_count += 1
-                            except ValueError:
-                                continue
+def render_pending_waiting_screen(username):
+    user = get_user_from_db(username)
+    if not user:
+        st.error("រកមិនឃើញគណនី។")
+        return
 
-                    st.success(f"បានធ្វើបច្ចុប្បន្នភាពក្បាលដីចំនួន {success_count} ជោគជ័យ!")
+    status = user[4]
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        if status == "pending":
+            st.info(f"⏳ **រង់ចាំការអនុម័ត**\n\nសួស្តី **{username}**! គណនីរបស់អ្នកកំពុងរង់ចាំ Admin ពិនិត្យ។")
+            time.sleep(3)
+            st.rerun()
+        elif status == "approved":
+            st.success(f"🎉 **បានអនុម័តជោគជ័យ!**\n\nស្វាគមន៍ **{username}**!")
+            if st.button("ចូលទៅកាន់ Dashboard", use_container_width=True):
+                client_ip = get_client_ip()
+                register_ip_session(client_ip, username)
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = username
+                st.session_state["role"] = user[3]
+                st.session_state.pop("pending_user", None)
+                st.rerun()
+
+
+@st.dialog(" ")
+def show_success_dialog(summary):
+    st.markdown(f"""
+        <div style="text-align: center;">
+            <h3 style="color: #10B981; margin-bottom: 0.5rem;">✓ រក្សាទុកជោគជ័យ</h3>
+            <p style="color: #94A3B8; font-size: 0.85rem;">បានធ្វើបច្ចុប្បន្នភាពទិន្នន័យក្បាលដីរួចរាល់</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    summary_df = pd.DataFrame([
+        {"ព័ត៌មាន": "ក្បាលដី", "ទិន្នន័យ": summary['code']},
+        {"ព័ត៌មាន": "ស្ថានភាព", "ទិន្នន័យ": summary['status']},
+        {"ព័ត៌មាន": "លេខទូស័ព្ទ", "ទិន្នន័យ": summary['phone']},
+        {"ព័ត៌មាន": "លក្ខខណ្ឌ", "ទិន្នន័យ": summary['condition']},
+        {"ព័ត៌មាន": "ព័ត៌មានខុសឆ្គង", "ទិន្នន័យ": summary['name_errors']},
+        {"ព័ត៌មាន": "ផ្សេងៗ", "ទិន្នន័យ": summary['notes']},
+        {"ព័ត៌មាន": "កាលបរិច្ឆេទ & ម៉ោង", "ទិន្នន័យ": summary['timestamp']},
+    ])
+
+    st.table(summary_df)
+    if st.button("បិទផ្ទាំង", use_container_width=True):
+        st.session_state.pop("show_save_success_dialog", None)
+        st.rerun()
+
+
+def main():
+    st.set_page_config(page_title="GIS Project Manager Slate", layout="wide")
+    inject_custom_css()
+    initialize_database()
+
+    client_ip = get_client_ip()
+
+    if not st.session_state.get("authenticated", False):
+        saved_username = get_username_by_ip(client_ip)
+        if saved_username:
+            user = get_user_from_db(saved_username)
+            if user and user[4] == "approved":
+                st.session_state["authenticated"] = True
+                st.session_state["username"] = user[1]
+                st.session_state["role"] = user[3]
+
+    if "pending_user" in st.session_state:
+        render_pending_waiting_screen(st.session_state["pending_user"])
+        return
+
+    if not st.session_state.get("authenticated", False):
+        render_auth_page(client_ip)
+        return
+
+    current_username = st.session_state.get("username", "Guest")
+    user_data = get_user_from_db(current_username)
+
+    if not user_data or user_data[4] == "inactive":
+        st.error("គណនីត្រូវបញ្ឈប់។")
+        clear_ip_session(client_ip)
+        st.session_state["authenticated"] = False
+        st.rerun()
+
+    current_role = user_data[3]
+    st.session_state["role"] = current_role
+    is_admin = current_role in ["admin", "temp_admin"]
+
+    projects = get_all_projects()
+
+    p_col1, p_col2, p_col3 = st.columns([3, 2, 1])
+    with p_col1:
+        app_title = get_app_title()
+        st.markdown(f"<h2 style='margin:0; font-size: 1.5rem; color:#F8FAFC;'>{app_title}</h2>", unsafe_allow_html=True)
+    with p_col2:
+        if projects:
+            proj_dict = {f"{p[1]} (ក្បាលដី: {p[2]})": p for p in projects}
+
+            if "active_project" not in st.session_state or st.session_state["active_project"] not in projects:
+                default_p = projects[0]
+                st.session_state["active_project"] = (default_p[0], default_p[1], default_p[2])
+                st.session_state.pop("cached_df_items", None)
+
+            current_p = st.session_state["active_project"]
+            current_label = f"{current_p[1]} (ក្បាលដី: {current_p[2]})"
+            labels = list(proj_dict.keys())
+            idx = labels.index(current_label) if current_label in labels else 0
+
+            selected_proj_label = st.selectbox("ជ្រើសរើសគម្រោង", labels, index=idx, label_visibility="collapsed")
+            active_p = proj_dict[selected_proj_label]
+
+            if st.session_state["active_project"] != (active_p[0], active_p[1], active_p[2]):
+                st.session_state["active_project"] = (active_p[0], active_p[1], active_p[2])
+                st.session_state.pop("cached_df_items", None)
+                st.rerun()
+
+    with p_col3:
+        if st.button("🚪 ចាកចេញ", use_container_width=True):
+            clear_ip_session(client_ip)
+            st.session_state["authenticated"] = False
+            st.session_state.pop("active_project", None)
+            st.session_state.pop("cached_df_items", None)
+            st.rerun()
+
+    if "active_project" not in st.session_state:
+        st.info("សូមជ្រើសរើស ឬបង្កើតគម្រោងដើម្បីបន្ត។")
+        return
+
+    project_id, project_name, total_items = st.session_state["active_project"]
+
+    nav_choices = [
+        "📋 បញ្ជីក្បាលដីសរុប",
+        "✏️ កែប្រែទិន្នន័យក្បាលដី",
+        "⏳ មិនទាន់បានពិនិត្យ",
+        "✅ បានពិនិត្យ",
+        "🚫 គ្មានទិន្នន័យ",
+        "📊 សរុបលក្ខខណ្ឌ",
+        "📜 ប្រវត្តិនៃការកែប្រែ (Logs)",
+        "⚙️ កែប្រែគម្រោង"
+    ]
+    if is_admin:
+        nav_choices.append("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)")
+
+    nav_choice = st.radio("Navigation Bar", options=nav_choices, horizontal=True, label_visibility="collapsed")
+
+    if "cached_df_items" not in st.session_state:
+        st.session_state["cached_df_items"] = load_project_items(project_id, total_items)
+
+    df_items = st.session_state["cached_df_items"]
+    df_valid_items = df_items[~df_items.apply(is_no_data, axis=1)]
+    df_no_data_items = df_items[df_items.apply(is_no_data, axis=1)]
+
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.markdown(f"""<div class="slate-metric"><div class="slate-metric-title">ក្បាលដីសរុប</div><div class="slate-metric-value">{total_items}</div></div>""", unsafe_allow_html=True)
+    with m2:
+        checked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"])
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #10B981;"><div class="slate-metric-title">បានពិនិត្យ</div><div class="slate-metric-value" style="color:#10B981;">{checked_count}</div></div>""", unsafe_allow_html=True)
+    with m3:
+        unchecked_count = len(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"])
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #F59E0B;"><div class="slate-metric-title">មិនទាន់បានពិនិត្យ</div><div class="slate-metric-value" style="color:#F59E0B;">{unchecked_count}</div></div>""", unsafe_allow_html=True)
+    with m4:
+        nodata_count = len(df_no_data_items)
+        st.markdown(f"""<div class="slate-metric" style="border-left-color: #EF4444;"><div class="slate-metric-title">គ្មានទិន្នន័យ</div><div class="slate-metric-value" style="color:#EF4444;">{nodata_count}</div></div>""", unsafe_allow_html=True)
+
+    st.write("---")
+
+    if st.session_state.get("show_save_success_dialog", False):
+        show_success_dialog(st.session_state.get("last_saved_summary", {}))
+
+    if nav_choice == "📋 បញ្ជីក្បាលដីសរុប":
+        st.subheader("📋 បញ្ជីក្បាលដីសរុប")
+        st.dataframe(df_valid_items, use_container_width=True)
+
+    elif nav_choice == "✏️ កែប្រែទិន្នន័យក្បាលដី":
+        st.subheader("✏️ កែប្រែទិន្នន័យក្បាលដី")
+
+        save_mode = st.radio("ទម្រង់នៃការរក្សាទុក", ["មួយក្បាលដី (Single)", "ច្រើនក្បាលដី (Multi-Save)"], horizontal=True)
+
+        if "edit_parcel_code" not in st.session_state:
+            st.session_state["edit_parcel_code"] = 1
+
+        code_to_update = st.session_state["edit_parcel_code"]
+        current_row = df_items[df_items["ក្បាលដី"] == code_to_update].iloc[0] if not df_items.empty else None
+
+        curr_status = current_row["ស្ថានភាព"] if current_row is not None else "មិនទាន់បានពិនិត្យ"
+        curr_phone = current_row["លេខទូស័ព្ទ"] if current_row is not None else ""
+        curr_notes = current_row["ផ្សេងៗ"] if current_row is not None else ""
+        curr_cond_str = current_row["លក្ខខណ្ឌ"] if (current_row is not None and current_row["លក្ខខណ្ឌ"] not in ["-", "ធម្មតា"]) else ""
+        curr_err_str = current_row["ព័ត៌មានខុសឆ្គង"] if (current_row is not None and current_row["ព័ត៌មានខុសឆ្គង"] not in ["-", "គ្មាន"]) else ""
+
+        default_conditions = [c.strip() for c in curr_cond_str.split(", ") if c.strip() in CONDITION_OPTIONS]
+        default_err_names = [e.strip() for e in curr_err_str.split(", ") if e.strip() in ERR_NAME_OPTIONS]
+
+        col1, col2 = st.columns(2)
+        with col1:
+            is_checked = st.checkbox("បានពិនិត្យ", value=(curr_status == "បានពិនិត្យ"))
+            no_data_checked = st.checkbox("គ្មានទិន្នន័យ", value=("គ្មានទិន្នន័យ" in default_conditions or curr_notes == "គ្មានទិន្នន័យ"))
+            phone_input = st.text_input("លេខទូស័ព្ទ", value=curr_phone)
+            notes_input = st.text_area("ផ្សេងៗ", value=curr_notes)
+
+        with col2:
+            selected_conditions = st.pills("លក្ខខណ្ឌ", options=CONDITION_OPTIONS, default=default_conditions, selection_mode="multi")
+            selected_name_errors = st.pills("ព័ត៌មានខុសឆ្គង (ឈ្មោះ / ថ្ងៃខែ / អាសយដ្ឋាន)", options=ERR_NAME_OPTIONS, default=default_err_names, selection_mode="multi")
+
+        curr_cambodia_dt = get_cambodia_now()
+        dt_col1, dt_col2 = st.columns(2)
+        with dt_col1: selected_date = st.date_input("កាលបរិច្ឆេទ", value=curr_cambodia_dt.date())
+        with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
+
+        # ----------------------------------------------------------------------
+        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED)
+        # ----------------------------------------------------------------------
+        hover_bar = st.container()
+        target_codes = []
+
+        with hover_bar:
+            st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
+
+            if save_mode == "មួយក្បាលដី (Single)":
+                # REMOVED: Previous and Next navigation buttons
+                b_col1, b_col2 = st.columns([1, 2])
+
+                with b_col1:
+                    new_code = st.number_input(
+                        "ក្បាលដី #",
+                        min_value=1,
+                        max_value=total_items,
+                        value=code_to_update,
+                        key="hover_code_input",
+                        label_visibility="collapsed"
+                    )
+                    if new_code != code_to_update:
+                        st.session_state["edit_parcel_code"] = new_code
+                        st.rerun()
+
+                with b_col2:
+                    save_trigger = st.button("💾 រក្សាទុក", type="primary", use_container_width=True)
+                
+                target_codes = [code_to_update]
+
+            else:
+                m_col1, m_col2 = st.columns([4, 2])
+                with m_col1:
+                    multi_input_str = st.text_input(
+                        "បញ្ចូលលេខក្បាលដីច្រើន (ឧទាហរណ៍: 1, 2, 5-10, 15)",
+                        value=f"{code_to_update}",
+                        key="multi_code_input",
+                        label_visibility="collapsed",
+                        placeholder="បញ្ចូលលេខក្បាលដី (ឧទាហរណ៍: 1, 2, 5-10, 15)"
+                    )
+                    target_codes = parse_parcel_codes(multi_input_str, total_items)
+
+                with m_col2:
+                    save_trigger = st.button(f"💾 រក្សាទុក ({len(target_codes)} ក្បាលដី)", type="primary", use_container_width=True)
+
+        if save_trigger:
+            if not target_codes:
+                st.error("សូមបញ្ចូលលេខក្បាលដីត្រឹមត្រូវយ៉ាងហោចណាស់មួយ!")
+            else:
+                new_status = "បានពិនិត្យ" if is_checked else "មិនទាន់បានពិនិត្យ"
+                final_notes = "គ្មានទិន្នន័យ" if no_data_checked and not notes_input.strip() else notes_input
+
+                selected_cond_list = list(selected_conditions) if selected_conditions else []
+                if no_data_checked and "គ្មានទិន្នន័យ" not in selected_cond_list:
+                    selected_cond_list.append("គ្មានទិន្នន័យ")
+
+                condition_str = ", ".join(selected_cond_list) if selected_cond_list else "ធម្មតា"
+                name_err_list = list(selected_name_errors) if selected_name_errors else []
+                name_err_str = ", ".join(name_err_list) if name_err_list else "គ្មាន"
+
+                combined_dt = datetime.datetime.combine(selected_date, selected_time)
+                formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
+
+                for code in target_codes:
+                    update_item_in_db(project_id, code, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+                
+                st.session_state.pop("cached_df_items", None)
+
+                display_codes = ", ".join(map(str, target_codes)) if len(target_codes) <= 5 else f"{target_codes[0]}...{target_codes[-1]} ({len(target_codes)} ក្បាលដី)"
+
+                st.session_state["last_saved_summary"] = {
+                    "code": display_codes,
+                    "status": new_status,
+                    "phone": phone_input,
+                    "notes": final_notes,
+                    "condition": condition_str,
+                    "name_errors": name_err_str,
+                    "timestamp": formatted_dt
+                }
+                st.session_state["show_save_success_dialog"] = True
+                st.rerun()
+
+    elif nav_choice == "⏳ មិនទាន់បានពិនិត្យ":
+        st.subheader("⏳ បញ្ជីក្បាលដីមិនទាន់បានពិនិត្យ")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "មិនទាន់បានពិនិត្យ"], use_container_width=True)
+
+    elif nav_choice == "✅ បានពិនិត្យ":
+        st.subheader("✅ បញ្ជីក្បាលដីបានពិនិត្យរួចរាល់")
+        st.dataframe(df_valid_items[df_valid_items["ស្ថានភាព"] == "បានពិនិត្យ"], use_container_width=True)
+
+    elif nav_choice == "🚫 គ្មានទិន្នន័យ":
+        st.subheader("🚫 បញ្ជីក្បាលដីគ្មានទិន្នន័យ")
+        st.dataframe(df_no_data_items, use_container_width=True)
+
+    elif nav_choice == "📊 សរុបលក្ខខណ្ឌ":
+        st.subheader("📊 សរុបតាមលក្ខខណ្ឌ")
+        summary_data = []
+        for option in CONDITION_OPTIONS:
+            matching_codes = []
+            for _, row in df_items.iterrows():
+                item_cond = row["លក្ខខណ្ឌ"]
+                if item_cond and item_cond not in ["-", "ធម្មតា"]:
+                    cond_list = [c.strip() for c in item_cond.split(",")]
+                    if option in cond_list:
+                        matching_codes.append(str(row["ក្បាលដី"]))
+
+            summary_data.append({
+                "ប្រភេទលក្ខខណ្ឌ": option,
+                "ចំនួនសរុប": len(matching_codes),
+                "បញ្ជីលេខក្បាលដី": ", ".join(matching_codes) if matching_codes else ""
+            })
+
+        st.dataframe(pd.DataFrame(summary_data), use_container_width=True)
+
+    elif nav_choice == "📜 ប្រវត្តិនៃការកែប្រែ (Logs)":
+        st.subheader("📜 ប្រវត្តិនៃការកែប្រែ (Logs)")
+        st.dataframe(get_project_history(project_id), use_container_width=True)
+
+    elif nav_choice == "⚙️ កែប្រែគម្រោង":
+        st.subheader("⚙️ ការកំណត់ និងបង្កើតគម្រោង")
+
+        col_left, col_right = st.columns(2)
+        with col_left:
+            with st.form("new_proj_form"):
+                st.markdown("#### បង្កើតគម្រោងថ្មី")
+                p_name_inp = st.text_input("ឈ្មោះគម្រោង", value="គម្រោងថ្មី")
+                p_items_inp = st.number_input("ក្បាលដីសរុប", min_value=1, value=100)
+                if st.form_submit_button("បង្កើតគម្រោង", use_container_width=True):
+                    pid, pname, pitems = create_new_project(p_name_inp.strip(), int(p_items_inp))
+                    st.session_state["active_project"] = (pid, pname, pitems)
+                    st.session_state.pop("cached_df_items", None)
+                    st.success(f"បានបង្កើតគម្រោង {pname} ជោគជ័យ!")
                     st.rerun()
-                else:
-                    st.warning("សូមបញ្ចូលទិន្នន័យជាមុនសិន។")
 
-    with tab_data:
-        st.subheader("បញ្ជីក្បាលដីទាំងអស់")
+        with col_right:
+            with st.form("edit_proj_form"):
+                st.markdown("#### កែប្រែគម្រោងបច្ចុប្បន្ន")
+                edit_name = st.text_input("ឈ្មោះគម្រោងថ្មី", value=project_name)
+                edit_total = st.number_input("ក្បាលដីសរុបថ្មី", min_value=1, value=total_items)
+                if st.form_submit_button("ធ្វើបច្ចុប្បន្នភាពគម្រោង", use_container_width=True):
+                    success, msg = update_project_details(project_id, edit_name.strip(), int(edit_total))
+                    if success:
+                        st.session_state["active_project"] = (project_id, edit_name.strip(), int(edit_total))
+                        st.session_state.pop("cached_df_items", None)
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
-        filter_status = st.multiselect("តម្រងតាមស្ថានភាព:", ["មិនទាន់បានពិនិត្យ", "បានពិនិត្យ"],
-                                       default=["មិនទាន់បានពិនិត្យ", "បានពិនិត្យ"])
-        filter_cond = st.multiselect("តម្រងតាមលក្ខខណ្ឌ:", list(set(df_items["លក្ខខណ្ឌ"].tolist())),
-                                     default=list(set(df_items["លក្ខខណ្ឌ"].tolist())))
+        if is_admin:
+            st.write("---")
+            st.markdown("### 🗑️ លុបគម្រោង (សម្រាប់ Admin តែប៉ុណ្ណោះ)")
+            proj_to_del_options = {f"{p[1]} (ID: {p[0]})": p for p in projects}
+            selected_del_label = st.selectbox("ជ្រើសរើសគម្រោងដែលត្រូវលុប", list(proj_to_del_options.keys()))
+            target_proj = proj_to_del_options[selected_del_label]
 
-        filtered_df = df_items[
-            (df_items["ស្ថានភាព"].isin(filter_status)) &
-            (df_items["លក្ខខណ្ឌ"].isin(filter_cond))
-            ]
+            with st.expander("⚠️ បញ្ជាក់ការលុបគម្រោង"):
+                st.warning(f"តើអ្នកពិតជាចង់លុបគម្រោង '{target_proj[1]}' នេះមែនទេ? ទិន្នន័យក្បាលដីទាំងអស់នឹងត្រូវលុបចោលទាំងស្រុង!")
+                if st.button("🗑️ យល់ព្រមលុបគម្រោង", type="primary", use_container_width=True):
+                    ok, msg = delete_project_by_id(target_proj[0])
+                    if ok:
+                        st.session_state.pop("active_project", None)
+                        st.session_state.pop("cached_df_items", None)
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
-        st.dataframe(filtered_df, use_container_width=True, height=400)
+    elif nav_choice == "👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin)" and is_admin:
+        st.subheader("👥 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Admin Control)")
 
-    with tab_summary:
-        st.subheader("សង្ខេបរបាយការណ៍")
+        with st.form("app_title_form_slate"):
+            new_title_val = st.text_input("ចំណងជើងកម្មវិធី (App Title)", value=app_title)
+            if st.form_submit_button("រក្សាទុកចំណងជើង", use_container_width=True):
+                set_app_title(new_title_val.strip())
+                st.rerun()
 
-        total_parcels = len(df_items)
-        checked_parcels = len(df_items[df_items["ស្ថានភាព"] == "បានពិនិត្យ"])
-        unchecked_parcels = total_parcels - checked_parcels
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("ក្បាលដីសរុប", total_parcels)
-        c2.metric("បានពិនិត្យរួច", checked_parcels, f"{(checked_parcels / total_parcels) * 100:.1f}%")
-        c3.metric("មិនទាន់បានពិនិត្យ", unchecked_parcels, f"{(unchecked_parcels / total_parcels) * 100:.1f}%")
-
-        st.markdown("---")
-        st.write("### ការបែងចែកតាមលក្ខខណ្ឌដី")
-        cond_counts = df_items["លក្ខខណ្ឌ"].value_counts().reset_index()
-        cond_counts.columns = ["លក្ខខណ្ឌ", "ចំនួនក្បាលដី"]
-        st.dataframe(cond_counts, use_container_width=True)
-
-    with tab_history:
-        st.subheader("ប្រវត្តិសកម្មភាពកែប្រែ")
-        logs_df = get_logs_for_project(selected_project_id)
-        st.dataframe(logs_df, use_container_width=True, height=400)
+        st.write("---")
+        df_u = get_all_users()
+        st.dataframe(df_u, use_container_width=True)
 
 
 if __name__ == "__main__":
