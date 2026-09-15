@@ -716,19 +716,16 @@ def main():
                 st.toast(f"✅ បានរក្សាទុកក្បាលដី {selected_code} រួចរាល់!", icon="🎉")
                 time.sleep(0.3)
 
-            # FLOATING BAR AT BOTTOM WITH PREV / NEXT / SAVE
+            # FLOATING BAR AT BOTTOM WITH SAVE BUTTON ONLY
             st.markdown("""
                 <div class="sticky-save-bar">
                     <div id="sticky-bar-content"></div>
                 </div>
             """, unsafe_allow_html=True)
 
-            bar_c1, bar_c2, bar_c3 = st.columns([2, 2, 2])
-
-            with bar_c2:
-                if st.button("💾 រក្សាទុក (Save)", type="primary", use_container_width=True):
-                    do_save()
-                    st.rerun()
+            if st.button("💾 រក្សាទុក (Save)", type="primary", use_container_width=True):
+                do_save()
+                st.rerun()
 
         else:
             st.subheader("បញ្ចូលទិន្នន័យច្រើនក្នុងពេលតែមួយ (Batch Input)")
