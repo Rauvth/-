@@ -501,27 +501,39 @@ def inject_custom_css():
                 background: #059669 !important;
             }
 
-            /* Floating Action Bar (Fixed at exact bottom) */
-            div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) {
+            /* Floating Action Bar (Fixed at exact bottom with reliable container scope) */
+            div[data-testid="stCustomComponentV1"],
+            .fixed-bottom-bar-wrapper {
                 position: fixed !important;
                 bottom: 0 !important;
                 left: 0 !important;
                 right: 0 !important;
                 width: 100vw !important;
-                height: auto !important;
-                min-height: 70px !important;
                 background-color: #1E293B !important;
                 border-top: 2px solid #334155 !important;
                 padding: 12px 24px !important;
                 margin: 0 !important;
                 z-index: 999999 !important;
                 box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.5) !important;
-                display: flex !important;
+            }
+
+            div[data-testid="stHorizontalBlock"]:has(.floating-hover-anchor) {
+                position: fixed !important;
+                bottom: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
+                width: 100vw !important;
+                background-color: #1E293B !important;
+                border-top: 2px solid #334155 !important;
+                padding: 12px 24px !important;
+                margin: 0 !important;
+                z-index: 999999 !important;
+                box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.5) !important;
                 align-items: center !important;
             }
 
-            /* Prevent Streamlit inner layout clipping inside the fixed bar */
-            div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) * {
+            /* Ensures inner elements inside bottom bar don't clip */
+            div[data-testid="stHorizontalBlock"]:has(.floating-hover-anchor) * {
                 overflow: visible !important;
             }
         </style>
@@ -809,47 +821,46 @@ def main():
         # ----------------------------------------------------------------------
         # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED)
         # ----------------------------------------------------------------------
-        hover_bar = st.container()
         target_codes = []
 
-        with hover_bar:
-            st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
+        if save_mode == "មួយក្បាលដី (Single)":
+            b_col1, b_col2, b_col3 = st.columns([1, 3, 1], vertical_alignment="center")
 
-            if save_mode == "មួយក្បាលដី (Single)":
-                b_col1, b_col2 = st.columns([1, 2], vertical_alignment="center")
+            with b_col1:
+                st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
+                new_code = st.number_input(
+                    "ក្បាលដី #",
+                    min_value=1,
+                    max_value=total_items,
+                    value=code_to_update,
+                    key="hover_code_input",
+                    label_visibility="collapsed"
+                )
+                if new_code != code_to_update:
+                    st.session_state["edit_parcel_code"] = new_code
+                    st.rerun()
 
-                with b_col1:
-                    new_code = st.number_input(
-                        "ក្បាលដី #",
-                        min_value=1,
-                        max_value=total_items,
-                        value=code_to_update,
-                        key="hover_code_input",
-                        label_visibility="collapsed"
-                    )
-                    if new_code != code_to_update:
-                        st.session_state["edit_parcel_code"] = new_code
-                        st.rerun()
+            with b_col2:
+                save_trigger = st.button("💾 រក្សាទុក", type="primary", use_container_width=True)
 
-                with b_col2:
-                    save_trigger = st.button("💾 រក្សាទុក", type="primary", use_container_width=True)
-                
-                target_codes = [code_to_update]
+            target_codes = [code_to_update]
 
-            else:
-                m_col1, m_col2 = st.columns([4, 2], vertical_alignment="center")
-                with m_col1:
-                    multi_input_str = st.text_input(
-                        "បញ្ចូលលេខក្បាលដីច្រើន",
-                        value=f"{code_to_update}",
-                        key="multi_code_input",
-                        label_visibility="collapsed",
-                        placeholder="បញ្ចូលលេខក្បាលដី (ឧទាហរណ៍: 1, 2, 5-10, 15)"
-                    )
-                    target_codes = parse_parcel_codes(multi_input_str, total_items)
+        else:
+            m_col1, m_col2, m_col3 = st.columns([3, 2, 1], vertical_alignment="center")
 
-                with m_col2:
-                    save_trigger = st.button(f"💾 រក្សាទុក ({len(target_codes)} ក្បាលដី)", type="primary", use_container_width=True)
+            with m_col1:
+                st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
+                multi_input_str = st.text_input(
+                    "បញ្ចូលលេខក្បាលដីច្រើន",
+                    value=f"{code_to_update}",
+                    key="multi_code_input",
+                    label_visibility="collapsed",
+                    placeholder="បញ្ចូលលេខក្បាលដី (ឧទាហរណ៍: 1, 2, 5-10, 15)"
+                )
+                target_codes = parse_parcel_codes(multi_input_str, total_items)
+
+            with m_col2:
+                save_trigger = st.button(f"💾 រក្សាទុក ({len(target_codes)} ក្បាលដី)", type="primary", use_container_width=True)
 
         if save_trigger:
             if not target_codes:
