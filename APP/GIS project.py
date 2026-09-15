@@ -6,6 +6,7 @@ import re
 from zoneinfo import ZoneInfo
 import streamlit as st
 import pandas as pd
+from contextlib import contextmanager
 
 # ==============================================================================
 # 🔐 SYSTEM DEFAULT ADMIN (PROTECTED ROOT ADMIN)
@@ -44,18 +45,21 @@ ERR_NAME_OPTIONS = [
 ]
 
 
-# --- 🚀 CONNECTION POOLING ---
+# --- 🚀 SAFE CONNECTION POOLING ---
 @st.cache_resource
 def init_db_pool():
-    return psycopg2.pool.SimpleConnectionPool(1, 10, st.secrets["postgres"]["url"])
+    # Supports up to 20 concurrent database connections safely
+    return psycopg2.pool.SimpleConnectionPool(1, 20, st.secrets["postgres"]["url"])
 
-
-def get_db_connection():
-    return init_db_pool().getconn()
-
-
-def release_db_connection(conn):
-    init_db_pool().putconn(conn)
+@contextmanager
+def get_db():
+    """Context manager that guarantees connections return to pool even on exception."""
+    pool_obj = init_db_pool()
+    conn = pool_obj.getconn()
+    try:
+        yield conn
+    finally:
+        pool_obj.putconn(conn)
 
 
 def get_cambodia_now():
@@ -74,275 +78,254 @@ def get_client_ip():
 
 
 def initialize_database():
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    username TEXT UNIQUE NOT NULL,
+                    password TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'user',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT DEFAULT '',
+                    temp_admin_expires TEXT DEFAULT ''
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            role TEXT NOT NULL DEFAULT 'user',
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT DEFAULT '',
-            temp_admin_expires TEXT DEFAULT ''
-        )
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    ip_address TEXT PRIMARY KEY,
+                    username TEXT NOT NULL,
+                    login_time TEXT NOT NULL
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_sessions (
-            ip_address TEXT PRIMARY KEY,
-            username TEXT NOT NULL,
-            login_time TEXT NOT NULL
-        )
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS app_settings (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
+            cursor.execute("""
+                INSERT INTO app_settings (key, value)
+                VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
+                ON CONFLICT (key) DO NOTHING
+            """)
 
-    cursor.execute("""
-        INSERT INTO app_settings (key, value)
-        VALUES ('app_title', '📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង')
-        ON CONFLICT (key) DO NOTHING
-    """)
+            cursor.execute("""
+                INSERT INTO users (username, password, role, status, created_at)
+                VALUES (%s, %s, 'admin', 'approved', %s)
+                ON CONFLICT (username) DO NOTHING
+            """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
 
-    cursor.execute("""
-        INSERT INTO users (username, password, role, status, created_at)
-        VALUES (%s, %s, 'admin', 'approved', %s)
-        ON CONFLICT (username) DO NOTHING
-    """, (DEFAULT_ADMIN_USER, DEFAULT_ADMIN_PASS, get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")))
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT UNIQUE NOT NULL,
+                    total_items INTEGER NOT NULL
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS projects (
-            id SERIAL PRIMARY KEY,
-            name TEXT UNIQUE NOT NULL,
-            total_items INTEGER NOT NULL
-        )
-    """)
+            cursor.execute("SELECT COUNT(*) FROM projects")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
 
-    cursor.execute("SELECT COUNT(*) FROM projects")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO projects (name, total_items) VALUES ('គម្រោងទី១', 100)")
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS items (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+                    code INTEGER,
+                    status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
+                    updated_at TEXT DEFAULT '',
+                    customer_phone TEXT DEFAULT '',
+                    notes TEXT DEFAULT '',
+                    condition TEXT DEFAULT '',
+                    name_errors TEXT DEFAULT ''
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS items (
-            id SERIAL PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-            code INTEGER,
-            status TEXT DEFAULT 'មិនទាន់បានពិនិត្យ',
-            updated_at TEXT DEFAULT '',
-            customer_phone TEXT DEFAULT '',
-            notes TEXT DEFAULT '',
-            condition TEXT DEFAULT '',
-            name_errors TEXT DEFAULT ''
-        )
-    """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS logs (
+                    id SERIAL PRIMARY KEY,
+                    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+                    code INTEGER,
+                    action_type TEXT,
+                    status TEXT DEFAULT '',
+                    customer_phone TEXT DEFAULT '',
+                    notes TEXT DEFAULT '',
+                    condition TEXT DEFAULT '',
+                    name_errors TEXT DEFAULT '',
+                    timestamp TEXT
+                )
+            """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS logs (
-            id SERIAL PRIMARY KEY,
-            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
-            code INTEGER,
-            action_type TEXT,
-            status TEXT DEFAULT '',
-            customer_phone TEXT DEFAULT '',
-            notes TEXT DEFAULT '',
-            condition TEXT DEFAULT '',
-            name_errors TEXT DEFAULT '',
-            timestamp TEXT
-        )
-    """)
-
-    conn.commit()
-    release_db_connection(conn)
+            conn.commit()
 
 
 # --- 🌐 IP SESSION MANAGEMENT ---
 def register_ip_session(ip, username):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-    cursor.execute("""
-        INSERT INTO user_sessions (ip_address, username, login_time)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (ip_address) DO UPDATE SET username = EXCLUDED.username, login_time = EXCLUDED.login_time
-    """, (ip, username, now_str))
-    conn.commit()
-    release_db_connection(conn)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            now_str = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+            cursor.execute("""
+                INSERT INTO user_sessions (ip_address, username, login_time)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (ip_address) DO UPDATE SET username = EXCLUDED.username, login_time = EXCLUDED.login_time
+            """, (ip, username, now_str))
+            conn.commit()
 
 
 def get_username_by_ip(ip):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT username FROM user_sessions WHERE ip_address = %s", (ip,))
-    row = cursor.fetchone()
-    release_db_connection(conn)
-    return row[0] if row else None
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT username FROM user_sessions WHERE ip_address = %s", (ip,))
+            row = cursor.fetchone()
+            return row[0] if row else None
 
 
 def clear_ip_session(ip):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM user_sessions WHERE ip_address = %s", (ip,))
-    conn.commit()
-    release_db_connection(conn)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM user_sessions WHERE ip_address = %s", (ip,))
+            conn.commit()
 
 
 @st.cache_data(ttl=300)
 def get_app_title():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
-    row = cursor.fetchone()
-    release_db_connection(conn)
-    return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT value FROM app_settings WHERE key = 'app_title'")
+            row = cursor.fetchone()
+            return row[0] if row else "📦 កម្មវិធីបិតផ្សាយ ខេត្តបាត់ដំបង"
 
 
 def set_app_title(new_title):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO app_settings (key, value) VALUES (%s, %s)
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    """, ('app_title', new_title))
-    conn.commit()
-    release_db_connection(conn)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                INSERT INTO app_settings (key, value) VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """, ('app_title', new_title))
+            conn.commit()
     st.cache_data.clear()
 
 
 def check_and_expire_temp_admins():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
-    rows = cursor.fetchall()
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, username, temp_admin_expires FROM users WHERE role = 'temp_admin'")
+            rows = cursor.fetchall()
 
-    now = get_cambodia_now()
-    for row in rows:
-        user_id, username, expire_str = row
-        if expire_str:
-            try:
-                expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
-                if now >= expire_dt:
-                    cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = %s", (user_id,))
-            except ValueError:
-                pass
-    conn.commit()
-    release_db_connection(conn)
+            now = get_cambodia_now()
+            for row in rows:
+                user_id, username, expire_str = row
+                if expire_str:
+                    try:
+                        expire_dt = datetime.datetime.strptime(expire_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=CAMBODIA_TZ)
+                        if now >= expire_dt:
+                            cursor.execute("UPDATE users SET role = 'user', temp_admin_expires = '' WHERE id = %s", (user_id,))
+                    except ValueError:
+                        pass
+            conn.commit()
 
 
 def get_user_from_db(username):
     check_and_expire_temp_admins()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
-                   (username,))
-    row = cursor.fetchone()
-    release_db_connection(conn)
-    return row
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, username, password, role, status, temp_admin_expires FROM users WHERE username = %s",
+                           (username,))
+            return cursor.fetchone()
 
 
 def register_user(username, password, requested_role):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
-    try:
-        cursor.execute("""
-            INSERT INTO users (username, password, role, status, created_at)
-            VALUES (%s, %s, %s, 'pending', %s)
-        """, (username, password, requested_role, created_at))
-        conn.commit()
-        release_db_connection(conn)
-        return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
-    except psycopg2.IntegrityError:
-        release_db_connection(conn)
-        return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            created_at = get_cambodia_now().strftime("%d/%m/%Y, %I:%M %p")
+            try:
+                cursor.execute("""
+                    INSERT INTO users (username, password, role, status, created_at)
+                    VALUES (%s, %s, %s, 'pending', %s)
+                """, (username, password, requested_role, created_at))
+                conn.commit()
+                return True, "សំណើសុំចុះឈ្មោះត្រូវបានបញ្ជូន!"
+            except psycopg2.IntegrityError:
+                return False, "ឈ្មោះអ្នកប្រើប្រាស់នេះមានរួចហើយ។ សូមជ្រើសរើសឈ្មោះផ្សេង។"
 
 
 def get_all_users():
     check_and_expire_temp_admins()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
-    rows = cursor.fetchall()
-    release_db_connection(conn)
-    return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, username, role, status, created_at, temp_admin_expires FROM users ORDER BY id DESC")
+            rows = cursor.fetchall()
+            return pd.DataFrame(rows, columns=["ID", "ឈ្មោះអ្នកប្រើប្រាស់", "នាទី", "ស្ថានភាព", "កាលបរិច្ឆេទបង្កើត", "ការផុតកំណត់អែដមីនបណ្តោះអាសន្ន"])
 
 
 @st.cache_data(ttl=60)
 def get_all_projects():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
-    projects = cursor.fetchall()
-    release_db_connection(conn)
-    return projects
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT id, name, total_items FROM projects ORDER BY id ASC")
+            return cursor.fetchall()
 
 
 def create_new_project(name, total_items):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
-        project_id = cursor.fetchone()[0]
-        conn.commit()
-    except psycopg2.IntegrityError:
-        conn.rollback()
-        cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
-        row = cursor.fetchone()
-        project_id, name, total_items = row[0], row[1], row[2]
-    release_db_connection(conn)
-    st.cache_data.clear()
-    return project_id, name, total_items
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute("INSERT INTO projects (name, total_items) VALUES (%s, %s) RETURNING id", (name, total_items))
+                project_id = cursor.fetchone()[0]
+                conn.commit()
+            except psycopg2.IntegrityError:
+                conn.rollback()
+                cursor.execute("SELECT id, name, total_items FROM projects WHERE name = %s", (name,))
+                row = cursor.fetchone()
+                project_id, name, total_items = row[0], row[1], row[2]
+            st.cache_data.clear()
+            return project_id, name, total_items
 
 
 def update_project_details(project_id, new_name, new_total_items):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
-                       (new_name, new_total_items, project_id))
-        conn.commit()
-        release_db_connection(conn)
-        st.cache_data.clear()
-        return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
-    except psycopg2.IntegrityError:
-        release_db_connection(conn)
-        return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute("UPDATE projects SET name = %s, total_items = %s WHERE id = %s",
+                               (new_name, new_total_items, project_id))
+                conn.commit()
+                st.cache_data.clear()
+                return True, "បានធ្វើបច្ចុប្បន្នភាពគម្រោងជោគជ័យ!"
+            except psycopg2.IntegrityError:
+                return False, "ឈ្មោះគម្រោងនេះមានរួចហើយ។"
 
 
 def delete_project_by_id(project_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM items WHERE project_id = %s", (project_id,))
-        cursor.execute("DELETE FROM logs WHERE project_id = %s", (project_id,))
-        cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
-        conn.commit()
-        release_db_connection(conn)
-        st.cache_data.clear()
-        return True, "បានលុបគម្រោងជោគជ័យ!"
-    except Exception as e:
-        conn.rollback()
-        release_db_connection(conn)
-        return False, f"កំហុសក្នុងការលុបគម្រោង: {str(e)}"
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            try:
+                cursor.execute("DELETE FROM items WHERE project_id = %s", (project_id,))
+                cursor.execute("DELETE FROM logs WHERE project_id = %s", (project_id,))
+                cursor.execute("DELETE FROM projects WHERE id = %s", (project_id,))
+                conn.commit()
+                st.cache_data.clear()
+                return True, "បានលុបគម្រោងជោគជ័យ!"
+            except Exception as e:
+                conn.rollback()
+                return False, f"កំហុសក្នុងការលុបគម្រោង: {str(e)}"
 
 
 def load_project_items(project_id, total_items):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
-        FROM items 
-        WHERE project_id = %s 
-        ORDER BY code ASC
-    """, (project_id,))
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT code, status, updated_at, customer_phone, notes, condition, name_errors 
+                FROM items 
+                WHERE project_id = %s 
+                ORDER BY code ASC
+            """, (project_id,))
 
-    existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
-    release_db_connection(conn)
+            existing_items = {row[0]: (row[1], row[2], row[3], row[4], row[5], row[6]) for row in cursor.fetchall()}
 
     data = []
     for code in range(1, total_items + 1):
@@ -373,31 +356,31 @@ def is_no_data(row):
     return ("គ្មានទិន្នន័យ" in cond) or (notes.strip() == "គ្មានទិន្នន័យ")
 
 
-def update_item_in_db(project_id, code, status, phone, notes, condition, name_errors, custom_timestamp):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+def update_items_batch(project_id, target_codes, status, phone, notes, condition, name_errors, custom_timestamp):
+    """Optimized database batch insert and update for multi-parcel performance."""
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            for code in target_codes:
+                cursor.execute("SELECT id FROM items WHERE project_id = %s AND code = %s", (project_id, code))
+                item = cursor.fetchone()
 
-    cursor.execute("SELECT id FROM items WHERE project_id = %s AND code = %s", (project_id, code))
-    item = cursor.fetchone()
+                if item:
+                    cursor.execute("""
+                        UPDATE items SET status = %s, updated_at = %s, customer_phone = %s, notes = %s, condition = %s, name_errors = %s
+                        WHERE id = %s
+                    """, (status, custom_timestamp, phone, notes, condition, name_errors, item[0]))
+                else:
+                    cursor.execute("""
+                        INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors) 
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
 
-    if item:
-        cursor.execute("""
-            UPDATE items SET status = %s, updated_at = %s, customer_phone = %s, notes = %s, condition = %s, name_errors = %s
-            WHERE id = %s
-        """, (status, custom_timestamp, phone, notes, condition, name_errors, item[0]))
-    else:
-        cursor.execute("""
-            INSERT INTO items (project_id, code, status, updated_at, customer_phone, notes, condition, name_errors) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        """, (project_id, code, status, custom_timestamp, phone, notes, condition, name_errors))
+                cursor.execute("""
+                    INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """, (project_id, code, "កែប្រែទិន្នន័យ", status, phone, notes, condition, name_errors, custom_timestamp))
 
-    cursor.execute("""
-        INSERT INTO logs (project_id, code, action_type, status, customer_phone, notes, condition, name_errors, timestamp)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-    """, (project_id, code, "កែប្រែទិន្នន័យ", status, phone, notes, condition, name_errors, custom_timestamp))
-
-    conn.commit()
-    release_db_connection(conn)
+            conn.commit()
 
 
 def parse_parcel_codes(input_str, max_limit):
@@ -424,16 +407,15 @@ def parse_parcel_codes(input_str, max_limit):
 
 
 def get_project_history(project_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
-        FROM logs 
-        WHERE project_id = %s 
-        ORDER BY id DESC LIMIT 200
-    """, (project_id,))
-    logs = cursor.fetchall()
-    release_db_connection(conn)
+    with get_db() as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT timestamp, code, action_type, status, customer_phone, notes, condition, name_errors 
+                FROM logs 
+                WHERE project_id = %s 
+                ORDER BY id DESC LIMIT 200
+            """, (project_id,))
+            logs = cursor.fetchall()
 
     data = []
     for log in logs:
@@ -461,6 +443,14 @@ def inject_custom_css():
         <style>
             @import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:wght@300;400;500;600;700&display=swap');
             
+            /* Hide Streamlit Header, Footer, and Toolbar Buttons */
+            #MainMenu {visibility: hidden;}
+            header {visibility: hidden;}
+            footer {visibility: hidden;}
+            div[data-testid="stStatusWidget"] { display: none !important; }
+            div[data-testid="manage-app-button"] { display: none !important; }
+            button[title="View app in Streamlit Community Cloud"] { display: none !important; }
+
             html, body, [class*="css"] {
                 font-family: 'Kantumruy Pro', sans-serif !important;
                 background-color: #0F172A !important;
@@ -863,8 +853,8 @@ def main():
                 combined_dt = datetime.datetime.combine(selected_date, selected_time)
                 formatted_dt = combined_dt.strftime("%d/%m/%Y, %I:%M %p")
 
-                for code in target_codes:
-                    update_item_in_db(project_id, code, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
+                # Perform optimized batch update
+                update_items_batch(project_id, target_codes, new_status, phone_input, final_notes, condition_str, name_err_str, formatted_dt)
                 
                 st.session_state.pop("cached_df_items", None)
 
