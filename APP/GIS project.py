@@ -48,12 +48,8 @@ ERR_NAME_OPTIONS = [
 @st.cache_resource
 def init_db_pool():
     pg_secrets = st.secrets["postgres"]
-    
-    # Check if 'url' key exists in secrets dict to pass as dsn
     if "url" in pg_secrets:
         return psycopg2.pool.SimpleConnectionPool(1, 10, dsn=pg_secrets["url"])
-    
-    # Otherwise, unpack standard parameters (host, dbname, user, password, port)
     return psycopg2.pool.SimpleConnectionPool(1, 10, **pg_secrets)
 
 
@@ -475,7 +471,7 @@ def inject_custom_css():
             }
             .stApp { 
                 background: #0F172A !important; 
-                padding-bottom: 160px !important; 
+                padding-bottom: 120px !important; 
             }
 
             .slate-metric {
@@ -505,18 +501,28 @@ def inject_custom_css():
                 background: #059669 !important;
             }
 
-            /* Floating Sticky Action Bar CSS (Lifted above Streamlit Cloud Footer) */
+            /* Floating Action Bar (Fixed at exact bottom) */
             div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) {
                 position: fixed !important;
-                bottom: 3.5rem !important;
+                bottom: 0 !important;
                 left: 0 !important;
                 right: 0 !important;
-                width: 100% !important;
+                width: 100vw !important;
+                height: auto !important;
+                min-height: 70px !important;
                 background-color: #1E293B !important;
                 border-top: 2px solid #334155 !important;
                 padding: 12px 24px !important;
+                margin: 0 !important;
                 z-index: 999999 !important;
                 box-shadow: 0px -4px 20px rgba(0, 0, 0, 0.5) !important;
+                display: flex !important;
+                align-items: center !important;
+            }
+
+            /* Prevent Streamlit inner layout clipping inside the fixed bar */
+            div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) * {
+                overflow: visible !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -801,7 +807,7 @@ def main():
         with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
         # ----------------------------------------------------------------------
-        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED - LIFTED)
+        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED)
         # ----------------------------------------------------------------------
         hover_bar = st.container()
         target_codes = []
@@ -810,7 +816,7 @@ def main():
             st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
 
             if save_mode == "មួយក្បាលដី (Single)":
-                b_col1, b_col2 = st.columns([1, 2])
+                b_col1, b_col2 = st.columns([1, 2], vertical_alignment="center")
 
                 with b_col1:
                     new_code = st.number_input(
@@ -831,10 +837,10 @@ def main():
                 target_codes = [code_to_update]
 
             else:
-                m_col1, m_col2 = st.columns([4, 2])
+                m_col1, m_col2 = st.columns([4, 2], vertical_alignment="center")
                 with m_col1:
                     multi_input_str = st.text_input(
-                        "បញ្ចូលលេខក្បាលដីច្រើន (ឧទាហរណ៍: 1, 2, 5-10, 15)",
+                        "បញ្ចូលលេខក្បាលដីច្រើន",
                         value=f"{code_to_update}",
                         key="multi_code_input",
                         label_visibility="collapsed",
