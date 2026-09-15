@@ -48,8 +48,8 @@ ERR_NAME_OPTIONS = [
 # --- 🚀 SAFE CONNECTION POOLING ---
 @st.cache_resource
 def init_db_pool():
-    # Supports up to 20 concurrent database connections safely
-    return psycopg2.pool.SimpleConnectionPool(1, 20, st.secrets["postgres"]["url"])
+    # Fixed connection pool unpacking for Streamlit secrets
+    return psycopg2.pool.SimpleConnectionPool(1, 20, **st.secrets["postgres"])
 
 @contextmanager
 def get_db():
