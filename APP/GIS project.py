@@ -47,8 +47,14 @@ ERR_NAME_OPTIONS = [
 # --- 🚀 CONNECTION POOLING ---
 @st.cache_resource
 def init_db_pool():
-    # FIX: Unpack the dictionary parameters from st.secrets["postgres"]
-    return psycopg2.pool.SimpleConnectionPool(1, 10, **st.secrets["postgres"])
+    pg_secrets = st.secrets["postgres"]
+    
+    # Check if 'url' key exists in secrets dict to pass as dsn
+    if "url" in pg_secrets:
+        return psycopg2.pool.SimpleConnectionPool(1, 10, dsn=pg_secrets["url"])
+    
+    # Otherwise, unpack standard parameters (host, dbname, user, password, port)
+    return psycopg2.pool.SimpleConnectionPool(1, 10, **pg_secrets)
 
 
 def get_db_connection():
@@ -801,7 +807,6 @@ def main():
             st.markdown('<div class="floating-hover-anchor"></div>', unsafe_allow_html=True)
 
             if save_mode == "មួយក្បាលដី (Single)":
-                # REMOVED: Previous and Next navigation buttons
                 b_col1, b_col2 = st.columns([1, 2])
 
                 with b_col1:
