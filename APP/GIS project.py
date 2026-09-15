@@ -473,7 +473,10 @@ def inject_custom_css():
                 background-color: #0F172A !important;
                 color: #F8FAFC !important;
             }
-            .stApp { background: #0F172A !important; padding-bottom: 120px !important; }
+            .stApp { 
+                background: #0F172A !important; 
+                padding-bottom: 160px !important; 
+            }
 
             .slate-metric {
                 background: #1E293B;
@@ -502,10 +505,10 @@ def inject_custom_css():
                 background: #059669 !important;
             }
 
-            /* Floating Sticky Action Bar CSS */
+            /* Floating Sticky Action Bar CSS (Lifted above Streamlit Cloud Footer) */
             div[data-testid="stVerticalBlock"] > div:has(div.floating-hover-anchor) {
                 position: fixed !important;
-                bottom: 0 !important;
+                bottom: 3.5rem !important;
                 left: 0 !important;
                 right: 0 !important;
                 width: 100% !important;
@@ -798,7 +801,7 @@ def main():
         with dt_col2: selected_time = st.time_input("ម៉ោង", value=curr_cambodia_dt.time())
 
         # ----------------------------------------------------------------------
-        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED)
+        # 📌 FLOATING ACTION HOVER BAR (BOTTOM FIXED - LIFTED)
         # ----------------------------------------------------------------------
         hover_bar = st.container()
         target_codes = []
